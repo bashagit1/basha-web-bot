@@ -61,6 +61,7 @@ const AdminDashboard: React.FC = () => {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set());
   const [isDownloading, setIsDownloading] = useState(false);
+  const [isDeletingImages, setIsDeletingImages] = useState(false);
 
   // Polling interval ref
   const pollInterval = useRef<any>(null);
@@ -169,7 +170,7 @@ const AdminDashboard: React.FC = () => {
     navigator.clipboard.writeText(text);
   };
 
-  // --- DOWNLOAD LOGIC ---
+  // --- DOWNLOAD & DELETE LOGIC ---
 
   const toggleSelectionMode = () => {
     setIsSelectionMode(!isSelectionMode);
@@ -205,6 +206,42 @@ const AdminDashboard: React.FC = () => {
         console.error("Download failed", err);
         alert("Failed to download image. Try again.");
     }
+  };
+
+  const handleDeleteSingleImage = async () => {
+      if(!selectedImage) return;
+      if(!confirm("Are you sure you want to delete this photo? This cannot be undone.")) return;
+
+      try {
+          await DB.deleteImageFromLog(selectedImage.logId, selectedImage.url);
+          setSelectedImage(null); // Close modal
+          refreshData(); // Reload grid
+      } catch(err: any) {
+          alert("Failed to delete image: " + err.message);
+      }
+  };
+
+  const handleBulkDelete = async (allImages: any[]) => {
+      if (selectedImageIds.size === 0) return;
+      if (!confirm(`Are you sure you want to delete ${selectedImageIds.size} images? This cannot be undone.`)) return;
+
+      setIsDeletingImages(true);
+      try {
+          const imagesToDelete = allImages.filter(img => selectedImageIds.has(img.id));
+          
+          // Delete sequentially to avoid race conditions on the same log row
+          for (const img of imagesToDelete) {
+             await DB.deleteImageFromLog(img.logId, img.url);
+          }
+
+          setIsSelectionMode(false);
+          setSelectedImageIds(new Set());
+          refreshData();
+      } catch (err: any) {
+          alert("Some images could not be deleted: " + err.message);
+      } finally {
+          setIsDeletingImages(false);
+      }
   };
 
   const handleBulkDownload = async (allImages: any[]) => {
@@ -545,6 +582,7 @@ const AdminDashboard: React.FC = () => {
     const galleryImages = logs.flatMap(log => 
         (log.imageUrls || []).map((url, idx) => ({
             id: `${log.id}-${idx}`,
+            logId: log.id,
             url,
             resident: log.residentName,
             category: log.category,
@@ -620,13 +658,27 @@ const AdminDashboard: React.FC = () => {
                 <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl z-40 flex items-center space-x-4 animate-fade-in-up">
                     <span className="font-bold text-sm">{selectedImageIds.size} Selected</span>
                     <div className="h-4 w-px bg-slate-700"></div>
+                    
+                    {/* Bulk Download */}
                     <button 
                         onClick={() => handleBulkDownload(filteredImages)}
-                        disabled={isDownloading}
+                        disabled={isDownloading || isDeletingImages}
                         className="flex items-center space-x-2 text-brand-400 font-bold hover:text-white transition-colors"
                     >
                         {isDownloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
                         <span>{isDownloading ? 'Zipping...' : 'Download ZIP'}</span>
+                    </button>
+
+                     <div className="h-4 w-px bg-slate-700"></div>
+
+                     {/* Bulk Delete */}
+                    <button 
+                        onClick={() => handleBulkDelete(filteredImages)}
+                        disabled={isDownloading || isDeletingImages}
+                        className="flex items-center space-x-2 text-red-400 font-bold hover:text-red-300 transition-colors"
+                    >
+                        {isDeletingImages ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                        <span>{isDeletingImages ? 'Deleting...' : 'Delete Selected'}</span>
                     </button>
                 </div>
             )}
@@ -708,7 +760,7 @@ const AdminDashboard: React.FC = () => {
                             <X className="w-5 h-5" />
                         </button>
 
-                        {/* Download Button (New) */}
+                        {/* Download Button */}
                         <button 
                             onClick={() => downloadSingleImage(selectedImage)}
                             className="absolute top-4 left-4 z-50 p-2 bg-black/50 text-white rounded-full hover:bg-brand-500 transition-colors flex items-center space-x-2 pr-4"
@@ -716,6 +768,16 @@ const AdminDashboard: React.FC = () => {
                         >
                             <Download className="w-5 h-5" />
                             <span className="text-xs font-bold">Save</span>
+                        </button>
+
+                         {/* Delete Button (New) */}
+                         <button 
+                            onClick={handleDeleteSingleImage}
+                            className="absolute bottom-4 right-4 md:right-auto md:left-4 z-50 p-2 bg-black/50 text-red-300 rounded-full hover:bg-red-600 hover:text-white transition-colors flex items-center space-x-2 pr-4"
+                            title="Delete Image"
+                        >
+                            <Trash2 className="w-5 h-5" />
+                            <span className="text-xs font-bold">Delete</span>
                         </button>
 
                         {/* Image Section */}

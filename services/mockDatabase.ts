@@ -1,4 +1,3 @@
-
 import { Resident, ActivityLog, WhatsAppGroup } from '../types';
 import { BotStatusResponse } from './database';
 
@@ -69,6 +68,26 @@ export const MockDB = {
       localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(newLogs));
       
       setTimeout(() => resolve(newLog), 1500); // Simulate AI processing and WhatsApp sending time
+    });
+  },
+
+  deleteImageFromLog: (logId: string, imageUrl: string): Promise<void> => {
+    return new Promise((resolve) => {
+        const stored = localStorage.getItem(STORAGE_KEY_LOGS);
+        if (stored) {
+            const logs: ActivityLog[] = JSON.parse(stored);
+            const updatedLogs = logs.map(log => {
+                if (log.id === logId) {
+                    return {
+                        ...log,
+                        imageUrls: log.imageUrls.filter(url => url !== imageUrl)
+                    };
+                }
+                return log;
+            });
+            localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(updatedLogs));
+        }
+        resolve();
     });
   },
 

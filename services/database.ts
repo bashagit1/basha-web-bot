@@ -1,4 +1,3 @@
-
 import { LiveDB } from './supabaseService';
 import { MockDB } from './mockDatabase';
 import { IS_LIVE_MODE } from './config';
@@ -12,11 +11,14 @@ export interface BotStatusResponse {
 interface DatabaseInterface {
   getResidents: () => Promise<Resident[]>;
   addResident: (resident: Omit<Resident, 'id'>) => Promise<Resident>;
-  deleteResident: (id: string) => Promise<void>; // Added delete method
+  deleteResident: (id: string) => Promise<void>;
   getLogs: () => Promise<ActivityLog[]>;
   createLog: (logData: Omit<ActivityLog, 'id' | 'timestamp' | 'status'>) => Promise<ActivityLog>;
   getWhatsAppGroups: () => Promise<WhatsAppGroup[]>;
   
+  // Media Management
+  deleteImageFromLog: (logId: string, imageUrl: string) => Promise<void>;
+
   // Bot Specific
   checkBotStatus: () => Promise<BotStatusResponse>;
   getBotQR: () => Promise<string | null>;

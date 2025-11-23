@@ -3,8 +3,11 @@ import { HashRouter as Router, Routes, Route, Link, Navigate, useLocation } from
 import StaffDashboard from './components/StaffDashboard';
 import AdminDashboard from './components/AdminDashboard';
 import { UserRole } from './types';
-import { Shield, User, LogOut, Heart, Sparkles, Moon, Sun } from 'lucide-react';
+import { Shield, User, LogOut, Heart, Sparkles, Moon, Sun, Lock } from 'lucide-react';
 import { IS_LIVE_MODE } from './services/config';
+
+// Safe access for PIN, defaults to 1234 if not set
+const ADMIN_PIN = import.meta.env?.VITE_ADMIN_PIN || '1234';
 
 const Layout: React.FC<{ children: React.ReactNode; role: UserRole; onLogout: () => void; isDarkMode: boolean; toggleTheme: () => void }> = ({ children, role, onLogout, isDarkMode, toggleTheme }) => {
   return (
@@ -63,6 +66,20 @@ const Layout: React.FC<{ children: React.ReactNode; role: UserRole; onLogout: ()
 };
 
 const LoginSelection: React.FC<{ onSelect: (role: UserRole) => void; toggleTheme: () => void; isDarkMode: boolean }> = ({ onSelect, toggleTheme, isDarkMode }) => {
+  const [showAdminLogin, setShowAdminLogin] = useState(false);
+  const [pin, setPin] = useState('');
+  const [error, setError] = useState(false);
+
+  const handleAdminAuth = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (pin === ADMIN_PIN) {
+          onSelect(UserRole.ADMIN);
+      } else {
+          setError(true);
+          setPin('');
+      }
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 relative overflow-hidden transition-colors duration-300">
       {/* Theme Toggle Absolute */}
@@ -109,7 +126,7 @@ const LoginSelection: React.FC<{ onSelect: (role: UserRole) => void; toggleTheme
 
           {/* Admin Card */}
           <button 
-            onClick={() => onSelect(UserRole.ADMIN)}
+            onClick={() => setShowAdminLogin(true)}
             className="group relative bg-white dark:bg-slate-800 p-8 rounded-3xl shadow-lg hover:shadow-2xl hover:shadow-purple-100 dark:hover:shadow-purple-900/20 transition-all duration-300 transform hover:-translate-y-1 border border-slate-100 dark:border-slate-700 text-left overflow-hidden"
           >
              <div className="absolute top-0 right-0 bg-purple-50 dark:bg-purple-900/20 w-32 h-32 rounded-full -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-500 ease-out opacity-50"></div>
@@ -124,6 +141,44 @@ const LoginSelection: React.FC<{ onSelect: (role: UserRole) => void; toggleTheme
           </button>
         </div>
       </div>
+      
+      {/* Admin Login Modal */}
+      {showAdminLogin && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+           <div className="bg-white dark:bg-slate-900 p-8 rounded-[2rem] shadow-2xl max-w-sm w-full border border-white/20 dark:border-slate-800 relative">
+              <button 
+                  onClick={() => setShowAdminLogin(false)}
+                  className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+              >
+                  <Lock className="w-5 h-5" />
+              </button>
+              
+              <div className="text-center mb-6">
+                  <h3 className="text-2xl font-bold text-slate-800 dark:text-white">Admin Access</h3>
+                  <p className="text-slate-500 dark:text-slate-400 text-sm">Enter security PIN to continue</p>
+              </div>
+
+              <form onSubmit={handleAdminAuth} className="space-y-4">
+                  <input 
+                      type="password" 
+                      autoFocus
+                      value={pin}
+                      onChange={(e) => { setPin(e.target.value); setError(false); }}
+                      placeholder="Enter PIN"
+                      className="w-full text-center text-2xl font-bold tracking-widest p-4 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 focus:ring-2 focus:ring-purple-500 outline-none dark:text-white"
+                  />
+                  {error && <p className="text-red-500 text-sm text-center font-bold">Incorrect PIN</p>}
+                  
+                  <button 
+                      type="submit"
+                      className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-xl transition-colors shadow-lg shadow-purple-200 dark:shadow-none"
+                  >
+                      Unlock
+                  </button>
+              </form>
+           </div>
+        </div>
+      )}
       
       <div className="absolute bottom-6 text-slate-400 dark:text-slate-500 text-sm font-medium flex items-center space-x-1">
         <Sparkles className="w-4 h-4 text-amber-400" />

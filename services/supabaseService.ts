@@ -200,6 +200,29 @@ export const LiveDB = {
     }));
   },
 
+  deleteImageFromLog: async (logId: string, imageUrl: string): Promise<void> => {
+    // 1. Fetch current log
+    const { data: log, error: fetchError } = await supabase
+      .from('activity_logs')
+      .select('image_urls')
+      .eq('id', logId)
+      .single();
+
+    if (fetchError || !log) throw new Error("Log not found to delete image");
+
+    // 2. Filter array
+    const currentUrls = log.image_urls || [];
+    const newUrls = currentUrls.filter((url: string) => url !== imageUrl);
+
+    // 3. Update log
+    const { error: updateError } = await supabase
+      .from('activity_logs')
+      .update({ image_urls: newUrls })
+      .eq('id', logId);
+
+    if (updateError) throw new Error("Failed to delete image from log");
+  },
+
   // --- GROUP DISCOVERY & BOT STATUS ---
 
   getWhatsAppGroups: async (): Promise<WhatsAppGroup[]> => {
