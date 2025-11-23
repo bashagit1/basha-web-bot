@@ -4,11 +4,15 @@ import { Resident, ActivityLog, WhatsAppGroup } from '../types';
 import { BotStatusResponse } from './database';
 
 // CONFIGURATION
-// In Vite, environment variables are accessed via import.meta.env.
-// We use optional chaining to safely fall back if env vars are missing or undefined.
+// Helper to sanitize the URL (remove trailing slash if present)
+const getBotUrl = () => {
+  const url = import.meta.env?.VITE_BOT_SERVER_URL || 'http://localhost:3001';
+  return url.endsWith('/') ? url.slice(0, -1) : url;
+};
+
 const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
 const SUPABASE_ANON_KEY = import.meta.env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
-const BOT_SERVER_URL = import.meta.env?.VITE_BOT_SERVER_URL || 'http://localhost:3001';
+const BOT_SERVER_URL = getBotUrl();
 
 // Initialize Client
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -67,7 +71,7 @@ export const LiveDB = {
   },
 
   deleteResident: async (id: string): Promise<void> => {
-    // 1. Delete logs first to handle foreign key constraints manually (if cascading isn't set up in DB)
+    // 1. Delete logs first to handle foreign key constraints manually
     const { error: logsError } = await supabase
         .from('activity_logs')
         .delete()
@@ -130,7 +134,7 @@ export const LiveDB = {
     
     if (residentGroupId && logData.aiGeneratedMessage) {
       try {
-        // Note: This fetch calls your local Node.js bot server
+        console.log(`Attempting to send update via: ${BOT_SERVER_URL}/send-update`);
         const response = await fetch(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -144,10 +148,11 @@ export const LiveDB = {
         if (response.ok) {
             finalStatus = 'SENT';
         } else {
+            console.warn(`Bot server responded with ${response.status}: ${response.statusText}`);
             finalStatus = 'FAILED';
         }
       } catch (err) {
-        console.warn("Bot server unreachable. Log saved but WhatsApp not sent.", err);
+        console.warn(`Bot server unreachable at ${BOT_SERVER_URL}. Is it running?`, err);
         finalStatus = 'FAILED';
       }
     }
@@ -201,17 +206,22 @@ export const LiveDB = {
         if (!response.ok) throw new Error("Bot server error");
         return await response.json();
     } catch (e) {
-        console.warn("Bot server offline or unreachable");
+        console.warn(`Bot server offline or unreachable at ${BOT_SERVER_URL}`);
         throw new Error("Bot server is offline. Please run 'node server/bot.js'");
     }
   },
 
   checkBotStatus: async (): Promise<BotStatusResponse> => {
     try {
+        // Debug log to help identify what URL is actually being hit
+        // Check console (F12) to see if this matches your Railway URL
+        console.log(`Checking bot status at: ${BOT_SERVER_URL}/status`); 
+        
         const response = await fetch(`${BOT_SERVER_URL}/status`);
-        if (!response.ok) throw new Error("Status check failed");
+        if (!response.ok) throw new Error(`Status check failed with ${response.status}`);
         return await response.json();
     } catch (e) {
+        console.warn("Bot status check failed:", e);
         return { status: 'offline' };
     }
   },

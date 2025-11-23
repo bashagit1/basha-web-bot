@@ -57,6 +57,7 @@ client.on('qr', (qr) => {
     currentQR = qr;
     isReady = false;
     console.log('QR RECEIVED', qr);
+    // Print QR to terminal for debugging if local
     qrcode.generate(qr, { small: true });
 });
 
@@ -78,12 +79,25 @@ client.on('disconnected', (reason) => {
     client.initialize();
 });
 
-client.initialize();
+// Initialize client but don't let it crash the server startup
+try {
+    client.initialize().catch(err => {
+        console.error("Client initialization failed:", err);
+    });
+} catch (err) {
+    console.error("Synchronous client error:", err);
+}
 
 // --- API ENDPOINTS ---
 
+// 0. Root Health Check (Useful for Railway logs)
+app.get('/', (req, res) => {
+    res.send('Elderly Care Watch AI Bot Server is Running!');
+});
+
 // 1. Check Status & Get QR info
 app.get('/status', (req, res) => {
+    console.log(`[${new Date().toISOString()}] Status check received`);
     res.json({ 
         status: isReady ? 'connected' : 'disconnected',
         hasQR: !!currentQR
@@ -129,9 +143,9 @@ app.post('/send-update', async (req, res) => {
 
         // Send Images (if any)
         if (imageUrls && imageUrls.length > 0) {
-             // Note: For full image support, we need to download the base64/url and convert 
-             // to MessageMedia. Keeping it simple for V1.
              console.log(`(Server) Would send images: ${imageUrls.length}`);
+             // Note: For full image support, we need to download the base64/url and convert 
+             // to MessageMedia.
         }
 
         res.json({ success: true });
