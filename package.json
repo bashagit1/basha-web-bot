@@ -14,7 +14,7 @@
     "react-router-dom": "^6.23.0",
     "lucide-react": "^0.378.0",
     "@supabase/supabase-js": "^2.43.1",
-    "@google/genai": "^0.1.1",
+    "@google/genai": "*",
     "jszip": "^3.10.1",
     "whatsapp-web.js": "^1.26.0",
     "qrcode-terminal": "^0.12.0",
