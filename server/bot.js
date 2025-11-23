@@ -10,12 +10,13 @@ const require = createRequire(import.meta.url);
  */
 
 // --- DEPENDENCY CHECK ---
-let Client, LocalAuth, qrcode, express, cors, dotenv;
+let Client, LocalAuth, MessageMedia, qrcode, express, cors, dotenv;
 
 try {
     const ww = require('whatsapp-web.js');
     Client = ww.Client;
     LocalAuth = ww.LocalAuth;
+    MessageMedia = ww.MessageMedia; // Required for images
     qrcode = require('qrcode-terminal');
     express = require('express');
     cors = require('cors');
@@ -35,7 +36,8 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Increase limit for base64 images
+app.use(express.json({ limit: '50mb' }));
 
 const PORT = process.env.PORT || 3001;
 
@@ -43,7 +45,15 @@ const PORT = process.env.PORT || 3001;
 const client = new Client({
     authStrategy: new LocalAuth(),
     puppeteer: {
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu'
+        ],
         headless: true 
     }
 });
@@ -56,30 +66,37 @@ client.on('qr', (qr) => {
     // Update current QR
     currentQR = qr;
     isReady = false;
-    console.log('QR RECEIVED', qr);
+    console.log('QR RECEIVED. Scan this to login.');
     // Print QR to terminal for debugging if local
     qrcode.generate(qr, { small: true });
 });
 
 client.on('ready', () => {
-    console.log('Client is ready!');
+    console.log('✅ Client is ready!');
     isReady = true;
     currentQR = null; // Clear QR when connected
 });
 
 client.on('authenticated', () => {
-    console.log('AUTHENTICATED');
+    console.log('✅ AUTHENTICATED');
     isReady = true;
     currentQR = null;
 });
 
-client.on('disconnected', (reason) => {
-    console.log('Client was logged out', reason);
+client.on('auth_failure', (msg) => {
+    console.error('❌ AUTHENTICATION FAILURE', msg);
     isReady = false;
+});
+
+client.on('disconnected', (reason) => {
+    console.log('⚠️ Client was logged out', reason);
+    isReady = false;
+    // Re-initialize to allow re-scanning
     client.initialize();
 });
 
-// Initialize client but don't let it crash the server startup
+// Initialize client
+console.log('Initializing WhatsApp Client...');
 try {
     client.initialize().catch(err => {
         console.error("Client initialization failed:", err);
@@ -90,14 +107,14 @@ try {
 
 // --- API ENDPOINTS ---
 
-// 0. Root Health Check (Useful for Railway logs)
+// 0. Root Health Check
 app.get('/', (req, res) => {
     res.send('Elderly Care Watch AI Bot Server is Running!');
 });
 
 // 1. Check Status & Get QR info
 app.get('/status', (req, res) => {
-    console.log(`[${new Date().toISOString()}] Status check received`);
+    console.log(`[${new Date().toISOString()}] Status check received. Ready: ${isReady}`);
     res.json({ 
         status: isReady ? 'connected' : 'disconnected',
         hasQR: !!currentQR
@@ -111,25 +128,37 @@ app.get('/qr', (req, res) => {
 
 // 3. Get All Groups (For Admin Discovery)
 app.get('/groups', async (req, res) => {
-    if (!isReady) return res.status(503).json({ error: 'WhatsApp not connected' });
+    if (!isReady) {
+        console.warn('GET /groups failed: Client not ready');
+        return res.status(503).json({ error: 'WhatsApp not connected' });
+    }
     
     try {
+        console.log('Fetching chats...');
         const chats = await client.getChats();
+        console.log(`Found ${chats.length} total chats.`);
+        
         const groups = chats
             .filter(chat => chat.isGroup)
             .map(chat => ({
                 id: chat.id._serialized,
                 name: chat.name
             }));
+            
+        console.log(`Filtered to ${groups.length} groups.`);
         res.json(groups);
     } catch (error) {
+        console.error('Error fetching groups:', error);
         res.status(500).json({ error: error.message });
     }
 });
 
 // 4. Send Update
 app.post('/send-update', async (req, res) => {
-    if (!isReady) return res.status(503).json({ error: 'WhatsApp not connected' });
+    if (!isReady) {
+        console.warn('POST /send-update failed: Client not ready');
+        return res.status(503).json({ error: 'WhatsApp not connected' });
+    }
 
     const { groupId, message, imageUrls } = req.body;
 
@@ -137,21 +166,52 @@ app.post('/send-update', async (req, res) => {
         return res.status(400).json({ error: 'Missing groupId or message' });
     }
 
-    try {
-        // Send Text
-        await client.sendMessage(groupId, message);
+    console.log(`Processing update for group: ${groupId}`);
 
-        // Send Images (if any)
+    try {
+        // 1. Validate Chat ID
+        // Note: We use getChatById to ensure the bot can actually find the chat
+        let chat;
+        try {
+            chat = await client.getChatById(groupId);
+        } catch (e) {
+            console.warn(`Chat ${groupId} not found in chat list. Attempting to send anyway.`);
+        }
+
+        // 2. Send Text
+        await client.sendMessage(groupId, message);
+        console.log('Text message sent.');
+
+        // 3. Send Images
         if (imageUrls && imageUrls.length > 0) {
-             console.log(`(Server) Would send images: ${imageUrls.length}`);
-             // Note: For full image support, we need to download the base64/url and convert 
-             // to MessageMedia.
+             console.log(`Processing ${imageUrls.length} images...`);
+             
+             for (const url of imageUrls) {
+                try {
+                    let media;
+                    // Handle Base64 Data URI
+                    if (url.startsWith('data:')) {
+                        media = new MessageMedia('image/jpeg', url.split(',')[1], 'update.jpg');
+                    } else {
+                        // Handle Remote URL
+                        media = await MessageMedia.fromUrl(url);
+                    }
+                    
+                    if (media) {
+                        await client.sendMessage(groupId, media);
+                        console.log('Image sent successfully.');
+                    }
+                } catch (imgErr) {
+                    console.error('Failed to process/send an image:', imgErr.message);
+                    // Don't fail the whole request if one image fails
+                }
+             }
         }
 
         res.json({ success: true });
     } catch (error) {
         console.error('Send failed:', error);
-        res.status(500).json({ error: 'Failed to send message' });
+        res.status(500).json({ error: 'Failed to send message: ' + error.message });
     }
 });
 

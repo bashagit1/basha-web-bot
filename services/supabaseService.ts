@@ -135,6 +135,8 @@ export const LiveDB = {
     if (residentGroupId && logData.aiGeneratedMessage) {
       try {
         console.log(`Attempting to send update via: ${BOT_SERVER_URL}/send-update`);
+        console.log('Payload:', { groupId: residentGroupId, messageLength: logData.aiGeneratedMessage.length, hasImages: logData.imageUrls.length > 0 });
+        
         const response = await fetch(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -203,11 +205,14 @@ export const LiveDB = {
   getWhatsAppGroups: async (): Promise<WhatsAppGroup[]> => {
     try {
         const response = await fetch(`${BOT_SERVER_URL}/groups`);
-        if (!response.ok) throw new Error("Bot server error");
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Bot Server Error (${response.status}): ${errorText}`);
+        }
         return await response.json();
     } catch (e) {
-        console.warn(`Bot server offline or unreachable at ${BOT_SERVER_URL}`);
-        throw new Error("Bot server is offline. Please run 'node server/bot.js'");
+        console.warn(`Bot server unreachable at ${BOT_SERVER_URL}`, e);
+        throw new Error("Could not fetch groups. Check if the Bot is Online.");
     }
   },
 
@@ -221,7 +226,8 @@ export const LiveDB = {
         if (!response.ok) throw new Error(`Status check failed with ${response.status}`);
         return await response.json();
     } catch (e) {
-        console.warn("Bot status check failed:", e);
+        // Quiet this log to avoid spamming the console
+        // console.warn("Bot status check failed:", e);
         return { status: 'offline' };
     }
   },
