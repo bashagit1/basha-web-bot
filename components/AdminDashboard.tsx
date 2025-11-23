@@ -155,6 +155,9 @@ const AdminDashboard: React.FC = () => {
     try {
       const groups = await DB.getWhatsAppGroups();
       setAvailableGroups(groups);
+      if (groups.length === 0) {
+        setScanError("No groups found yet. Please open WhatsApp on your phone, open a group chat, and try scanning again in 10 seconds.");
+      }
     } catch (err: any) {
       setScanError(err.message || "Could not scan groups. Is the bot running?");
     } finally {

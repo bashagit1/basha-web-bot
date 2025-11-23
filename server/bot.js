@@ -114,7 +114,8 @@ app.get('/', (req, res) => {
 
 // 1. Check Status & Get QR info
 app.get('/status', (req, res) => {
-    console.log(`[${new Date().toISOString()}] Status check received. Ready: ${isReady}`);
+    // Log less frequently to avoid spam
+    // console.log(`[${new Date().toISOString()}] Status check received. Ready: ${isReady}`);
     res.json({ 
         status: isReady ? 'connected' : 'disconnected',
         hasQR: !!currentQR
@@ -138,14 +139,20 @@ app.get('/groups', async (req, res) => {
         const chats = await client.getChats();
         console.log(`Found ${chats.length} total chats.`);
         
+        // Filter for groups: either isGroup property OR id ends with @g.us
         const groups = chats
-            .filter(chat => chat.isGroup)
+            .filter(chat => chat.isGroup || chat.id._serialized.endsWith('@g.us'))
             .map(chat => ({
                 id: chat.id._serialized,
-                name: chat.name
+                name: chat.name || 'Unknown Group'
             }));
             
         console.log(`Filtered to ${groups.length} groups.`);
+        
+        if (groups.length === 0) {
+            console.log("No groups found. This might be because the chat history hasn't synced yet.");
+        }
+        
         res.json(groups);
     } catch (error) {
         console.error('Error fetching groups:', error);
@@ -169,29 +176,24 @@ app.post('/send-update', async (req, res) => {
     console.log(`Processing update for group: ${groupId}`);
 
     try {
-        // 1. Validate Chat ID
-        // Note: We use getChatById to ensure the bot can actually find the chat
-        let chat;
-        try {
-            chat = await client.getChatById(groupId);
-        } catch (e) {
-            console.warn(`Chat ${groupId} not found in chat list. Attempting to send anyway.`);
-        }
-
-        // 2. Send Text
+        // 1. Send Text
         await client.sendMessage(groupId, message);
         console.log('Text message sent.');
 
-        // 3. Send Images
+        // 2. Send Images
         if (imageUrls && imageUrls.length > 0) {
              console.log(`Processing ${imageUrls.length} images...`);
              
+             // Send sequentially to ensure order
              for (const url of imageUrls) {
                 try {
                     let media;
                     // Handle Base64 Data URI
                     if (url.startsWith('data:')) {
-                        media = new MessageMedia('image/jpeg', url.split(',')[1], 'update.jpg');
+                        const parts = url.split(',');
+                        const mime = parts[0].match(/:(.*?);/)[1];
+                        const data = parts[1];
+                        media = new MessageMedia(mime, data, 'update.jpg');
                     } else {
                         // Handle Remote URL
                         media = await MessageMedia.fromUrl(url);
@@ -203,14 +205,20 @@ app.post('/send-update', async (req, res) => {
                     }
                 } catch (imgErr) {
                     console.error('Failed to process/send an image:', imgErr.message);
-                    // Don't fail the whole request if one image fails
                 }
+                
+                // Small delay between images to prevent rate limiting issues
+                await new Promise(r => setTimeout(r, 500));
              }
         }
 
         res.json({ success: true });
     } catch (error) {
         console.error('Send failed:', error);
+        // If it's an invalid ID error, tell the user
+        if (error.message.includes('invalid Wid')) {
+            return res.status(400).json({ error: 'Invalid Group ID. Please scan groups again.' });
+        }
         res.status(500).json({ error: 'Failed to send message: ' + error.message });
     }
 });
