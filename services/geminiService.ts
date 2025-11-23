@@ -1,10 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 
 // Initialize Gemini AI
-// NOTE: In a production environment, this would likely happen server-side to protect the key,
-// but for this architecture, we are demonstrating the "AI Agent" capability.
-const apiKey = process.env.API_KEY || ''; 
-const ai = new GoogleGenAI({ apiKey });
+// Using process.env.API_KEY as per coding guidelines
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const GeminiService = {
   /**
@@ -15,10 +13,7 @@ export const GeminiService = {
     category: string,
     staffNotes: string
   ): Promise<string> => {
-    if (!apiKey) {
-      console.warn("Gemini API Key missing. Returning default message.");
-      return `Update for ${residentName}: ${category}. ${staffNotes}`;
-    }
+    // API Key is assumed to be valid and available as per guidelines.
 
     const prompt = `
       You are an AI assistant for an elderly care home. 
@@ -37,6 +32,7 @@ export const GeminiService = {
     `;
 
     try {
+      // Using gemini-2.5-flash as the standard for text tasks
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: prompt,

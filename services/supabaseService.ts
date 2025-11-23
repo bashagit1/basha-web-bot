@@ -1,12 +1,13 @@
-
+/// <reference types="vite/client" />
 import { createClient } from '@supabase/supabase-js';
 import { Resident, ActivityLog, WhatsAppGroup } from '../types';
 import { BotStatusResponse } from './database';
 
 // CONFIGURATION
-const SUPABASE_URL = 'https://zaiektkvhjfndfebolao.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
-const BOT_SERVER_URL = 'http://localhost:3001'; // Address where server/bot.js is running locally
+// In Vite, environment variables are accessed via import.meta.env
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
+const BOT_SERVER_URL = import.meta.env.VITE_BOT_SERVER_URL || 'http://localhost:3001';
 
 // Initialize Client
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
