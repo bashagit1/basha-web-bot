@@ -400,7 +400,7 @@ const AdminDashboard: React.FC = () => {
                 )}
                 <div className="flex items-center text-sm text-slate-500 dark:text-slate-400 space-x-2 bg-slate-50 dark:bg-slate-700 px-4 py-2 rounded-full">
                     <Smartphone className="w-4 h-4" />
-                    <span>Open WhatsApp > Linked Devices > Link a Device</span>
+                    <span>Open WhatsApp &gt; Linked Devices &gt; Link a Device</span>
                 </div>
             </div>
             )}
