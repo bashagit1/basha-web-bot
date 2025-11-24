@@ -17,7 +17,6 @@ import {
   AlertCircle,
   User,
   Coffee,
-  MugHot,
   Moon,
   Sun,
   Smile,
@@ -59,20 +58,68 @@ const StaffDashboard: React.FC = () => {
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // --- IMAGE COMPRESSION ENGINE ---
+  const processImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          
+          // Resize to max 1200px (Good quality, low file size)
+          const MAX_SIZE = 1200;
+          if (width > height) {
+            if (width > MAX_SIZE) {
+              height *= MAX_SIZE / width;
+              width = MAX_SIZE;
+            }
+          } else {
+            if (height > MAX_SIZE) {
+              width *= MAX_SIZE / height;
+              height = MAX_SIZE;
+            }
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+             ctx.drawImage(img, 0, 0, width, height);
+             // Compress to JPEG at 80% quality
+             resolve(canvas.toDataURL('image/jpeg', 0.8)); 
+          } else {
+             reject(new Error("Canvas context failed"));
+          }
+        };
+        img.onerror = reject;
+        img.src = e.target?.result as string;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        // Limit images based on category
-        const limit = category === UpdateCategory.VITALS ? 3 : 1;
-        if (images.length < limit) {
-          setImages(prev => [...prev, reader.result as string]);
-        } else {
-          alert(`Maximum ${limit} image(s) allowed for this category.`);
-        }
-      };
-      reader.readAsDataURL(file);
+      
+      // Limit images based on category
+      const limit = category === UpdateCategory.VITALS ? 3 : 1;
+      if (images.length >= limit) {
+         alert(`Maximum ${limit} image(s) allowed for this category.`);
+         return;
+      }
+
+      try {
+        const processedImage = await processImage(file);
+        setImages(prev => [...prev, processedImage]);
+      } catch (err) {
+        console.error("Image processing failed", err);
+        alert("Failed to process image. Please try again.");
+      }
     }
   };
 
@@ -226,7 +273,7 @@ const StaffDashboard: React.FC = () => {
     },
     { 
         id: UpdateCategory.TEA_TIME, 
-        icon: <MugHot className="w-8 h-8" />, 
+        icon: <Coffee className="w-8 h-8" />, 
         label: 'Tea Time', 
         bg: 'bg-teal-100', 
         text: 'text-teal-600', 

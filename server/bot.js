@@ -191,7 +191,7 @@ app.post('/send-update', async (req, res) => {
                         const mime = parts[0].match(/:(.*?);/)[1];
                         const data = parts[1];
                         // Generate a filename based on timestamp
-                        media = new MessageMedia(mime, data, `update_${Date.now()}.jpg`);
+                        media = new MessageMedia(mime, data, `update_${Date.now()}_${i}.jpg`);
                     } else {
                         // Handle Remote URL
                         media = await MessageMedia.fromUrl(url);
@@ -205,11 +205,14 @@ app.post('/send-update', async (req, res) => {
                     console.error('Failed to process/send an image:', imgErr.message);
                 }
                 
-                // Small delay to ensure order and prevent rate limits
-                if (imageUrls.length > 1) {
-                    await new Promise(r => setTimeout(r, 800));
-                }
+                // Delay between images to ensure order
+                await new Promise(r => setTimeout(r, 1500));
             }
+        }
+
+        // Add a safety delay between last image and text to prevent race conditions in WhatsApp
+        if (hasImages && hasText) {
+            await new Promise(r => setTimeout(r, 2000));
         }
 
         // 2. Send Text Message (if any)
