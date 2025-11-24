@@ -135,16 +135,32 @@ app.get('/groups', async (req, res) => {
     
     try {
         console.log('Fetching chats...');
-        const chats = await client.getChats();
         
-        // Filter for groups: either isGroup property OR id ends with @g.us
-        const groups = chats
-            .filter(chat => chat.isGroup || chat.id._serialized.endsWith('@g.us'))
-            .map(chat => ({
-                id: chat.id._serialized,
-                name: chat.name || 'Unknown Group'
-            }));
+        let attempts = 0;
+        let groups = [];
+        
+        // Retry logic: WhatsApp Web sometimes takes a moment to sync chats after 'ready'
+        while (attempts < 3 && groups.length === 0) {
+            const chats = await client.getChats();
             
+            // Filter for groups: either isGroup property OR id ends with @g.us
+            groups = chats
+                .filter(chat => chat.isGroup || chat.id._serialized.endsWith('@g.us'))
+                .map(chat => ({
+                    id: chat.id._serialized,
+                    name: chat.name || 'Unknown Group'
+                }));
+
+            if (groups.length === 0) {
+                console.log(`Attempt ${attempts + 1}: No groups found. Retrying in 2s...`);
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                attempts++;
+            } else {
+                break; // Found groups, exit loop
+            }
+        }
+
+        console.log(`Found ${groups.length} groups.`);
         res.json(groups);
     } catch (error) {
         console.error('Error fetching groups:', error);
