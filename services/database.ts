@@ -11,6 +11,7 @@ export interface BotStatusResponse {
 interface DatabaseInterface {
   getResidents: () => Promise<Resident[]>;
   addResident: (resident: Omit<Resident, 'id'>) => Promise<Resident>;
+  updateResident: (id: string, updates: Partial<Resident>) => Promise<void>;
   deleteResident: (id: string) => Promise<void>;
   getLogs: () => Promise<ActivityLog[]>;
   createLog: (logData: Omit<ActivityLog, 'id' | 'timestamp' | 'status'>) => Promise<ActivityLog>;

@@ -1,4 +1,3 @@
-/// <reference types="vite/client" />
 import { createClient } from '@supabase/supabase-js';
 import { Resident, ActivityLog, WhatsAppGroup } from '../types';
 import { BotStatusResponse } from './database';
@@ -6,12 +5,15 @@ import { BotStatusResponse } from './database';
 // CONFIGURATION
 // Helper to sanitize the URL (remove trailing slash if present)
 const getBotUrl = () => {
-  const url = import.meta.env?.VITE_BOT_SERVER_URL || 'http://localhost:3001';
+  // Use casting to any to avoid TS errors in some environments if types aren't picked up
+  const env = (import.meta as any).env;
+  const url = env?.VITE_BOT_SERVER_URL || 'http://localhost:3001';
   return url.endsWith('/') ? url.slice(0, -1) : url;
 };
 
-const SUPABASE_URL = import.meta.env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
-const SUPABASE_ANON_KEY = import.meta.env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
+const env = (import.meta as any).env;
+const SUPABASE_URL = env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
+const SUPABASE_ANON_KEY = env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
 const BOT_SERVER_URL = getBotUrl();
 
 // Initialize Client
@@ -68,6 +70,25 @@ export const LiveDB = {
       whatsappGroupId: data.whatsapp_group_id,
       photoUrl: data.photo_url
     };
+  },
+
+  updateResident: async (id: string, updates: Partial<Resident>): Promise<void> => {
+    const dbUpdates: any = {};
+    if (updates.name) dbUpdates.name = updates.name;
+    if (updates.roomNumber) dbUpdates.room_number = updates.roomNumber;
+    if (updates.whatsappGroupId) dbUpdates.whatsapp_group_id = updates.whatsappGroupId;
+    if (updates.photoUrl) dbUpdates.photo_url = updates.photoUrl;
+    if (updates.notes) dbUpdates.notes = updates.notes;
+
+    const { error } = await supabase
+      .from('residents')
+      .update(dbUpdates)
+      .eq('id', id);
+
+    if (error) {
+      console.error('Supabase Error updating resident:', error);
+      throw new Error(error.message);
+    }
   },
 
   deleteResident: async (id: string): Promise<void> => {
@@ -132,17 +153,25 @@ export const LiveDB = {
     // 2. Trigger WhatsApp Bot (The "Agent")
     let finalStatus = 'PENDING';
     
-    if (residentGroupId && logData.aiGeneratedMessage) {
+    // Check if we have anything to send (Text OR Images)
+    const hasMessage = logData.aiGeneratedMessage && logData.aiGeneratedMessage.trim() !== '';
+    const hasImages = logData.imageUrls && logData.imageUrls.length > 0;
+
+    if (residentGroupId && (hasMessage || hasImages)) {
       try {
         console.log(`Attempting to send update via: ${BOT_SERVER_URL}/send-update`);
-        console.log('Payload:', { groupId: residentGroupId, messageLength: logData.aiGeneratedMessage.length, hasImages: logData.imageUrls.length > 0 });
+        console.log('Payload:', { 
+            groupId: residentGroupId, 
+            messageLength: logData.aiGeneratedMessage?.length || 0, 
+            imageCount: logData.imageUrls.length 
+        });
         
         const response = await fetch(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             groupId: residentGroupId,
-            message: logData.aiGeneratedMessage,
+            message: logData.aiGeneratedMessage || '', // Send empty string if null
             imageUrls: logData.imageUrls
           })
         });
@@ -157,6 +186,9 @@ export const LiveDB = {
         console.warn(`Bot server unreachable at ${BOT_SERVER_URL}. Is it running?`, err);
         finalStatus = 'FAILED';
       }
+    } else if (residentGroupId) {
+         // Group exists, but no content to send? (Rare edge case)
+         finalStatus = 'SENT'; 
     }
 
     // Update status in DB if changed
@@ -241,16 +273,10 @@ export const LiveDB = {
 
   checkBotStatus: async (): Promise<BotStatusResponse> => {
     try {
-        // Debug log to help identify what URL is actually being hit
-        // Check console (F12) to see if this matches your Railway URL
-        console.log(`Checking bot status at: ${BOT_SERVER_URL}/status`); 
-        
         const response = await fetch(`${BOT_SERVER_URL}/status`);
         if (!response.ok) throw new Error(`Status check failed with ${response.status}`);
         return await response.json();
     } catch (e) {
-        // Quiet this log to avoid spamming the console
-        // console.warn("Bot status check failed:", e);
         return { status: 'offline' };
     }
   },

@@ -114,8 +114,6 @@ app.get('/', (req, res) => {
 
 // 1. Check Status & Get QR info
 app.get('/status', (req, res) => {
-    // Log less frequently to avoid spam
-    // console.log(`[${new Date().toISOString()}] Status check received. Ready: ${isReady}`);
     res.json({ 
         status: isReady ? 'connected' : 'disconnected',
         hasQR: !!currentQR
@@ -149,10 +147,6 @@ app.get('/groups', async (req, res) => {
             
         console.log(`Filtered to ${groups.length} groups.`);
         
-        if (groups.length === 0) {
-            console.log("No groups found. This might be because the chat history hasn't synced yet.");
-        }
-        
         res.json(groups);
     } catch (error) {
         console.error('Error fetching groups:', error);
@@ -169,16 +163,25 @@ app.post('/send-update', async (req, res) => {
 
     const { groupId, message, imageUrls } = req.body;
 
-    if (!groupId || !message) {
-        return res.status(400).json({ error: 'Missing groupId or message' });
+    if (!groupId) {
+        return res.status(400).json({ error: 'Missing groupId' });
+    }
+
+    // Relaxed Validation: Allow empty message IF there are images
+    if ((!message || message.trim() === '') && (!imageUrls || imageUrls.length === 0)) {
+        return res.status(400).json({ error: 'At least a message or an image is required' });
     }
 
     console.log(`Processing update for group: ${groupId}`);
 
     try {
-        // 1. Send Text
-        await client.sendMessage(groupId, message);
-        console.log('Text message sent.');
+        // 1. Send Text (Only if present)
+        if (message && message.trim().length > 0) {
+            await client.sendMessage(groupId, message);
+            console.log('Text message sent.');
+        } else {
+            console.log('No text message provided, skipping text.');
+        }
 
         // 2. Send Images
         if (imageUrls && imageUrls.length > 0) {
@@ -215,7 +218,6 @@ app.post('/send-update', async (req, res) => {
         res.json({ success: true });
     } catch (error) {
         console.error('Send failed:', error);
-        // If it's an invalid ID error, tell the user
         if (error.message.includes('invalid Wid')) {
             return res.status(400).json({ error: 'Invalid Group ID. Please scan groups again.' });
         }

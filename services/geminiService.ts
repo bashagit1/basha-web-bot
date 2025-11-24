@@ -15,15 +15,22 @@ export const GeminiService = {
   ): Promise<string> => {
     // API Key is assumed to be valid and available as per guidelines.
 
+    // 1. Logic for General Update:
+    // If it is 'General Update' and there are NO staff notes, do not generate a message.
+    // This allows staff to just upload a photo without AI inventing text.
+    if (category === 'General Update' && (!staffNotes || staffNotes.trim().length === 0)) {
+        return ""; // Return empty string. The logging system will skip sending text if this is empty.
+    }
+
     let specificInstruction = "";
 
-    // logic to determine the strictness of the prompt
+    // 2. Logic to determine the strictness of the prompt
     if (category === 'Vital Signs' || category === 'Glucose') {
       specificInstruction = "Strictly write ONE short line. State that checks were done and status is stable (unless notes say otherwise). Example: 'Vital signs checked - everything looks normal.'";
     } else if (staffNotes && staffNotes.trim().length > 0) {
       specificInstruction = "The staff provided a specific note. Polish it to be professional and grammatically correct, but keep it VERY short. Do not add extra fluff. Max 1 sentence.";
     } else {
-      // Default for Meals/General without notes
+      // Default for Meals without notes
       specificInstruction = `Write a very brief 1-sentence update about ${category}. Keep it under 12 words. Example: '${residentName} had a good appetite for breakfast.'`;
     }
 
