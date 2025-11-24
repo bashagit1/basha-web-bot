@@ -175,6 +175,7 @@ app.post('/send-update', async (req, res) => {
     const hasText = message && message.trim().length > 0;
 
     try {
+        // 1. Send Images (if any)
         if (hasImages) {
             console.log(`Sending ${imageUrls.length} images...`);
             
@@ -197,15 +198,8 @@ app.post('/send-update', async (req, res) => {
                     }
                     
                     if (media) {
-                        // Logic: Send the text as a CAPTION to the first image
-                        // This ensures the text and image are linked and reduces notification spam
-                        if (i === 0 && hasText) {
-                            await client.sendMessage(groupId, media, { caption: message });
-                            console.log('Sent first image with caption.');
-                        } else {
-                            await client.sendMessage(groupId, media);
-                            console.log(`Sent image ${i + 1}.`);
-                        }
+                        await client.sendMessage(groupId, media);
+                        console.log(`Sent image ${i + 1}.`);
                     }
                 } catch (imgErr) {
                     console.error('Failed to process/send an image:', imgErr.message);
@@ -216,12 +210,10 @@ app.post('/send-update', async (req, res) => {
                     await new Promise(r => setTimeout(r, 800));
                 }
             }
+        }
 
-            // Note: If text was present, it was sent as caption to the first image.
-            // If loops finished successfully, we are good.
-
-        } else if (hasText) {
-            // Text ONLY
+        // 2. Send Text Message (if any)
+        if (hasText) {
             await client.sendMessage(groupId, message);
             console.log('Text message sent.');
         }
