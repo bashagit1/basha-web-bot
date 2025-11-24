@@ -36,8 +36,9 @@ dotenv.config();
 
 const app = express();
 app.use(cors());
-// Increase limit for base64 images
+// Increase limit for base64 images to avoid PayloadTooLargeError
 app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const PORT = process.env.PORT || 3001;
 
@@ -135,7 +136,6 @@ app.get('/groups', async (req, res) => {
     try {
         console.log('Fetching chats...');
         const chats = await client.getChats();
-        console.log(`Found ${chats.length} total chats.`);
         
         // Filter for groups: either isGroup property OR id ends with @g.us
         const groups = chats
@@ -145,8 +145,6 @@ app.get('/groups', async (req, res) => {
                 name: chat.name || 'Unknown Group'
             }));
             
-        console.log(`Filtered to ${groups.length} groups.`);
-        
         res.json(groups);
     } catch (error) {
         console.error('Error fetching groups:', error);
@@ -173,52 +171,65 @@ app.post('/send-update', async (req, res) => {
     }
 
     console.log(`Processing update for group: ${groupId}`);
+    const hasImages = imageUrls && imageUrls.length > 0;
+    const hasText = message && message.trim().length > 0;
 
     try {
-        // 1. Send Text (Only if present)
-        if (message && message.trim().length > 0) {
-            await client.sendMessage(groupId, message);
-            console.log('Text message sent.');
-        } else {
-            console.log('No text message provided, skipping text.');
-        }
+        if (hasImages) {
+            console.log(`Sending ${imageUrls.length} images...`);
+            
+            // Loop through images
+            for (let i = 0; i < imageUrls.length; i++) {
+                const url = imageUrls[i];
+                let media;
 
-        // 2. Send Images
-        if (imageUrls && imageUrls.length > 0) {
-             console.log(`Processing ${imageUrls.length} images...`);
-             
-             // Send sequentially to ensure order
-             for (const url of imageUrls) {
                 try {
-                    let media;
                     // Handle Base64 Data URI
                     if (url.startsWith('data:')) {
                         const parts = url.split(',');
                         const mime = parts[0].match(/:(.*?);/)[1];
                         const data = parts[1];
-                        media = new MessageMedia(mime, data, 'update.jpg');
+                        // Generate a filename based on timestamp
+                        media = new MessageMedia(mime, data, `update_${Date.now()}.jpg`);
                     } else {
                         // Handle Remote URL
                         media = await MessageMedia.fromUrl(url);
                     }
                     
                     if (media) {
-                        await client.sendMessage(groupId, media);
-                        console.log('Image sent successfully.');
+                        // Logic: Send the text as a CAPTION to the first image
+                        // This ensures the text and image are linked and reduces notification spam
+                        if (i === 0 && hasText) {
+                            await client.sendMessage(groupId, media, { caption: message });
+                            console.log('Sent first image with caption.');
+                        } else {
+                            await client.sendMessage(groupId, media);
+                            console.log(`Sent image ${i + 1}.`);
+                        }
                     }
                 } catch (imgErr) {
                     console.error('Failed to process/send an image:', imgErr.message);
                 }
                 
-                // Small delay between images to prevent rate limiting issues
-                await new Promise(r => setTimeout(r, 500));
-             }
+                // Small delay to ensure order and prevent rate limits
+                if (imageUrls.length > 1) {
+                    await new Promise(r => setTimeout(r, 800));
+                }
+            }
+
+            // Note: If text was present, it was sent as caption to the first image.
+            // If loops finished successfully, we are good.
+
+        } else if (hasText) {
+            // Text ONLY
+            await client.sendMessage(groupId, message);
+            console.log('Text message sent.');
         }
 
         res.json({ success: true });
     } catch (error) {
         console.error('Send failed:', error);
-        if (error.message.includes('invalid Wid')) {
+        if (error.message && error.message.includes('invalid Wid')) {
             return res.status(400).json({ error: 'Invalid Group ID. Please scan groups again.' });
         }
         res.status(500).json({ error: 'Failed to send message: ' + error.message });

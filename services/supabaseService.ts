@@ -154,24 +154,20 @@ export const LiveDB = {
     let finalStatus = 'PENDING';
     
     // Check if we have anything to send (Text OR Images)
+    // We allow empty text if images are present.
     const hasMessage = logData.aiGeneratedMessage && logData.aiGeneratedMessage.trim() !== '';
     const hasImages = logData.imageUrls && logData.imageUrls.length > 0;
 
     if (residentGroupId && (hasMessage || hasImages)) {
       try {
         console.log(`Attempting to send update via: ${BOT_SERVER_URL}/send-update`);
-        console.log('Payload:', { 
-            groupId: residentGroupId, 
-            messageLength: logData.aiGeneratedMessage?.length || 0, 
-            imageCount: logData.imageUrls.length 
-        });
         
         const response = await fetch(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             groupId: residentGroupId,
-            message: logData.aiGeneratedMessage || '', // Send empty string if null
+            message: logData.aiGeneratedMessage || '', // Send empty string if null, bot handles it
             imageUrls: logData.imageUrls
           })
         });
