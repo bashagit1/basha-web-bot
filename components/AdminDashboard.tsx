@@ -77,6 +77,8 @@ const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     refreshData();
+    // Attempt to load groups silently on mount so they are ready for the Add Resident modal
+    loadGroupsSilently(); 
     startBotPolling();
     return () => stopBotPolling();
   }, [activeTab]);
@@ -118,11 +120,24 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
+  const loadGroupsSilently = async () => {
+      try {
+          const groups = await DB.getWhatsAppGroups();
+          if (groups && groups.length > 0) {
+              setAvailableGroups(groups);
+          }
+      } catch (e) {
+          // Ignore errors on silent load
+      }
+  };
+
   const openAddModal = () => {
     setIsEditing(false);
     setNewResident({});
     setCurrentResidentId(null);
     setShowAddModal(true);
+    // Try refreshing groups when modal opens if we don't have any
+    if (availableGroups.length === 0) loadGroupsSilently();
   };
 
   const openEditModal = (resident: Resident) => {
@@ -130,6 +145,7 @@ const AdminDashboard: React.FC = () => {
     setNewResident(resident);
     setCurrentResidentId(resident.id);
     setShowAddModal(true);
+    if (availableGroups.length === 0) loadGroupsSilently();
   };
 
   const handleSaveResident = async (e: React.FormEvent) => {
@@ -1006,19 +1022,31 @@ const AdminDashboard: React.FC = () => {
                 />
               </div>
               <div className="space-y-2">
-                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">WhatsApp Group ID</label>
+                <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">WhatsApp Family Group</label>
                 <div className="relative">
-                    <input 
-                    type="text" 
-                    required 
-                    className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none transition-all focus:bg-white dark:focus:bg-slate-800 dark:text-white pl-10"
-                    value={newResident.whatsappGroupId || ''}
-                    onChange={e => setNewResident({...newResident, whatsappGroupId: e.target.value})}
-                    placeholder="120363... @g.us"
-                    />
+                    <select 
+                        required 
+                        className="w-full p-4 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl focus:ring-2 focus:ring-brand-500 outline-none transition-all focus:bg-white dark:focus:bg-slate-800 dark:text-white pl-10 appearance-none"
+                        value={newResident.whatsappGroupId || ''}
+                        onChange={e => setNewResident({...newResident, whatsappGroupId: e.target.value})}
+                    >
+                        <option value="">Select a Group...</option>
+                        {availableGroups.length > 0 ? (
+                            availableGroups.map(g => (
+                                <option key={g.id} value={g.id}>{g.name}</option>
+                            ))
+                        ) : (
+                            <option value="" disabled>No groups found. Please Scan Groups first.</option>
+                        )}
+                    </select>
                     <Smartphone className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+                    {/* Add dropdown arrow icon if desired, or rely on browser default/appearance-none */}
                 </div>
-                <p className="text-xs text-slate-500 dark:text-slate-500 mt-1 px-1">Use the "Scan Groups" tool in the WhatsApp tab to find this.</p>
+                {availableGroups.length === 0 && (
+                    <p className="text-xs text-amber-500 mt-1 px-1">
+                        List is empty. Go to the "WhatsApp Bot" tab and click "Scan Groups".
+                    </p>
+                )}
               </div>
               <div className="flex justify-end space-x-3 mt-8 pt-4 border-t border-slate-100 dark:border-slate-800">
                 <button 

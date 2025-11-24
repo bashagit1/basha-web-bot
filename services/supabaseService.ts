@@ -177,8 +177,12 @@ export const LiveDB = {
             console.warn(`Bot server responded with ${response.status}: ${response.statusText}`);
             finalStatus = 'FAILED';
         }
-      } catch (err) {
+      } catch (err: any) {
         console.warn(`Bot server unreachable at ${BOT_SERVER_URL}. Is it running?`, err);
+        // Specialized error for "Failed to fetch" often meaning backend is sleeping/offline
+        if (err.message && err.message.includes('Failed to fetch')) {
+             console.error("CRITICAL: Backend Server likely offline or sleeping.");
+        }
         finalStatus = 'FAILED';
       }
     } else if (residentGroupId) {
@@ -206,33 +210,44 @@ export const LiveDB = {
      // Fetch resident group ID
     const { data: residentData } = await supabase
         .from('residents')
-        .select('whatsapp_group_id')
+        .select('whatsapp_group_id, name')
         .eq('id', log.residentId)
         .single();
         
     const residentGroupId = residentData?.whatsapp_group_id;
+    const residentName = residentData?.name || "Unknown";
 
-    if (!residentGroupId) throw new Error("Resident has no WhatsApp Group");
-
-    const response = await fetch(`${BOT_SERVER_URL}/send-update`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-        groupId: residentGroupId,
-        message: log.aiGeneratedMessage || '',
-        imageUrls: log.imageUrls
-        })
-    });
-
-    if (!response.ok) {
-        throw new Error("Retry failed. Bot rejected the request.");
+    if (!residentGroupId) {
+        throw new Error(`Resident "${residentName}" has no WhatsApp Group linked. Please edit the resident and select a group.`);
     }
 
-    // Update status to SENT
-    await supabase
-        .from('activity_logs')
-        .update({ status: 'SENT' })
-        .eq('id', log.id);
+    try {
+        const response = await fetch(`${BOT_SERVER_URL}/send-update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+            groupId: residentGroupId,
+            message: log.aiGeneratedMessage || '',
+            imageUrls: log.imageUrls
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error("Retry failed. Bot rejected the request.");
+        }
+
+        // Update status to SENT
+        await supabase
+            .from('activity_logs')
+            .update({ status: 'SENT' })
+            .eq('id', log.id);
+
+    } catch (err: any) {
+        if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
+            throw new Error("Connection Refused: The Bot Server seems to be offline or sleeping. Please wake it up.");
+        }
+        throw err;
+    }
   },
 
   getLogs: async (): Promise<ActivityLog[]> => {
@@ -293,8 +308,13 @@ export const LiveDB = {
             throw new Error(`Bot Server Error (${response.status}): ${errorText}`);
         }
         return await response.json();
-    } catch (e) {
+    } catch (e: any) {
         console.warn(`Bot server unreachable at ${BOT_SERVER_URL}`, e);
+        if (e.name === 'TypeError' && e.message === 'Failed to fetch') {
+             // Return empty array instead of throwing to prevent blocking the UI
+             console.log("Bot server sleeping/offline, returning empty group list.");
+             return [];
+        }
         throw new Error("Could not fetch groups. Check if the Bot is Online.");
     }
   },
