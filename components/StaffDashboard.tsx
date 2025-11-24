@@ -58,51 +58,7 @@ const StaffDashboard: React.FC = () => {
     }
   };
 
-  // --- IMAGE COMPRESSION ENGINE ---
-  const processImage = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-          
-          // Resize to max 1200px (Good quality, low file size)
-          const MAX_SIZE = 1200;
-          if (width > height) {
-            if (width > MAX_SIZE) {
-              height *= MAX_SIZE / width;
-              width = MAX_SIZE;
-            }
-          } else {
-            if (height > MAX_SIZE) {
-              width *= MAX_SIZE / height;
-              height = MAX_SIZE;
-            }
-          }
-          
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (ctx) {
-             ctx.drawImage(img, 0, 0, width, height);
-             // Compress to JPEG at 80% quality
-             resolve(canvas.toDataURL('image/jpeg', 0.8)); 
-          } else {
-             reject(new Error("Canvas context failed"));
-          }
-        };
-        img.onerror = reject;
-        img.src = e.target?.result as string;
-      };
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-  };
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       
@@ -113,13 +69,11 @@ const StaffDashboard: React.FC = () => {
          return;
       }
 
-      try {
-        const processedImage = await processImage(file);
-        setImages(prev => [...prev, processedImage]);
-      } catch (err) {
-        console.error("Image processing failed", err);
-        alert("Failed to process image. Please try again.");
-      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImages(prev => [...prev, reader.result as string]);
+      };
+      reader.readAsDataURL(file);
     }
   };
 

@@ -210,11 +210,6 @@ app.post('/send-update', async (req, res) => {
             }
         }
 
-        // Add a safety delay between last image and text to prevent race conditions in WhatsApp
-        if (hasImages && hasText) {
-            await new Promise(r => setTimeout(r, 2000));
-        }
-
         // 2. Send Text Message (if any)
         if (hasText) {
             await client.sendMessage(groupId, message);
