@@ -7,7 +7,6 @@ export enum UserRole {
 export enum UpdateCategory {
   BREAKFAST = 'Breakfast',
   LUNCH = 'Lunch',
-  TEA_TIME = 'Tea Time',
   DINNER = 'Dinner',
   VITALS = 'Vital Signs',
   GLUCOSE = 'Glucose',
