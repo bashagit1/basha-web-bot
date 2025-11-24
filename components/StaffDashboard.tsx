@@ -224,6 +224,18 @@ const StaffDashboard: React.FC = () => {
         darkBorder: 'dark:border-orange-800'
     },
     { 
+        id: UpdateCategory.TEA_TIME, 
+        icon: <Coffee className="w-8 h-8" />, 
+        label: 'Tea Time', 
+        bg: 'bg-teal-100', 
+        text: 'text-teal-600', 
+        border: 'border-teal-200', 
+        ring: 'focus:ring-teal-400',
+        darkBg: 'dark:bg-teal-900/30',
+        darkText: 'dark:text-teal-400',
+        darkBorder: 'dark:border-teal-800'
+    },
+    { 
         id: UpdateCategory.DINNER, 
         icon: <Moon className="w-8 h-8" />, 
         label: 'Dinner', 

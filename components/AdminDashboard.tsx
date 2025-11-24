@@ -682,6 +682,7 @@ const AdminDashboard: React.FC = () => {
                         <option value="all">All Categories</option>
                         <option value="Breakfast">Breakfast</option>
                         <option value="Lunch">Lunch</option>
+                        <option value="Tea Time">Tea Time</option>
                         <option value="Dinner">Dinner</option>
                         <option value="Vital Signs">Vitals</option>
                         <option value="General Update">General</option>
