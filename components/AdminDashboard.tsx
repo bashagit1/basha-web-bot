@@ -68,6 +68,9 @@ const AdminDashboard: React.FC = () => {
   const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set());
   const [isDownloading, setIsDownloading] = useState(false);
   const [isDeletingImages, setIsDeletingImages] = useState(false);
+  
+  // Retry State
+  const [retryingLogId, setRetryingLogId] = useState<string | null>(null);
 
   // Polling interval ref
   const pollInterval = useRef<any>(null);
@@ -164,6 +167,18 @@ const AdminDashboard: React.FC = () => {
     } finally {
         setIsDeleting(false);
     }
+  };
+
+  const handleRetryLog = async (log: ActivityLog) => {
+      setRetryingLogId(log.id);
+      try {
+          await DB.retryLog(log);
+          refreshData(); // Refresh to see updated status
+      } catch (err: any) {
+          alert("Retry failed: " + err.message);
+      } finally {
+          setRetryingLogId(null);
+      }
   };
 
   const handleProfilePictureUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -584,11 +599,29 @@ const AdminDashboard: React.FC = () => {
                         <span className="text-xs text-slate-500 dark:text-slate-400 font-medium bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">{log.category}</span>
                    </div>
                 </div>
-                <div className={`flex items-center space-x-1 text-xs font-bold px-3 py-1 rounded-full border ${
-                  log.status === 'SENT' ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border-green-100 dark:border-green-900' : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-900'
-                }`}>
-                  {log.status === 'SENT' ? <CheckCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
-                  <span>{log.status}</span>
+                <div className="flex items-center gap-2">
+                    {/* Retry Button for Failed Logs */}
+                    {log.status === 'FAILED' && (
+                        <button 
+                            onClick={() => handleRetryLog(log)}
+                            disabled={retryingLogId === log.id}
+                            className="flex items-center space-x-1 text-xs font-bold px-3 py-1 rounded-full border bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border-red-100 dark:border-red-900 hover:bg-red-100 dark:hover:bg-red-900/40 transition-colors"
+                        >
+                            <RefreshCw className={`w-3 h-3 ${retryingLogId === log.id ? 'animate-spin' : ''}`} />
+                            <span>{retryingLogId === log.id ? 'Retrying...' : 'Retry'}</span>
+                        </button>
+                    )}
+                    
+                    <div className={`flex items-center space-x-1 text-xs font-bold px-3 py-1 rounded-full border ${
+                    log.status === 'SENT' 
+                        ? 'bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border-green-100 dark:border-green-900' 
+                        : log.status === 'FAILED'
+                        ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border-red-100 dark:border-red-900'
+                        : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-900'
+                    }`}>
+                    {log.status === 'SENT' ? <CheckCircle className="w-3 h-3" /> : <Clock className="w-3 h-3" />}
+                    <span>{log.status}</span>
+                    </div>
                 </div>
               </div>
               

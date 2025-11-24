@@ -5,8 +5,6 @@ import { Resident, UpdateCategory } from '../types';
 import { 
   Camera, 
   Upload, 
-  Utensils, 
-  Activity, 
   HeartPulse, 
   FileText, 
   Send, 
@@ -58,7 +56,35 @@ const StaffDashboard: React.FC = () => {
     }
   };
 
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // --- SMART IMAGE RESIZER (High Quality, Low Size) ---
+  const resizeImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target?.result as string;
+            img.onload = () => {
+                const canvas = document.createElement('canvas');
+                // Resize to HD (1280px width) - great for WhatsApp, fast for network
+                const maxWidth = 1280; 
+                const scaleSize = maxWidth / img.width;
+                const width = (img.width > maxWidth) ? maxWidth : img.width;
+                const height = (img.width > maxWidth) ? img.height * scaleSize : img.height;
+
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx?.drawImage(img, 0, 0, width, height);
+                
+                // JPEG at 0.85 quality is virtually indistinguishable but 10x smaller
+                resolve(canvas.toDataURL('image/jpeg', 0.85));
+            };
+        };
+    });
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       
@@ -69,11 +95,14 @@ const StaffDashboard: React.FC = () => {
          return;
       }
 
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setImages(prev => [...prev, reader.result as string]);
-      };
-      reader.readAsDataURL(file);
+      try {
+        // Resize immediately upon selection
+        const resizedBase64 = await resizeImage(file);
+        setImages(prev => [...prev, resizedBase64]);
+      } catch (err) {
+        console.error("Error processing image", err);
+        alert("Could not process image. Try again.");
+      }
     }
   };
 
@@ -91,8 +120,8 @@ const StaffDashboard: React.FC = () => {
       }))
     );
 
-    // Target height for normalization (high quality)
-    const targetHeight = 1000;
+    // Target height for normalization
+    const targetHeight = 800; // Optimized height
     let totalWidth = 0;
 
     // Calculate total width needed
@@ -132,7 +161,6 @@ const StaffDashboard: React.FC = () => {
         currentX += drawWidth;
     });
 
-    // Compress slightly to ensure it fits in messages (JPEG 0.85)
     return canvas.toDataURL('image/jpeg', 0.85);
   };
 
@@ -144,56 +172,55 @@ const StaffDashboard: React.FC = () => {
     
     const resident = residents.find(r => r.id === selectedResidentId);
     
-    // Generate AI Message
-    const aiMessage = await GeminiService.generateMessage(
-      resident?.name || 'Resident',
-      category,
-      notes
-    );
-
-    // Handle Image Processing (Collage Creation)
-    let finalImages = images;
-    if (category === UpdateCategory.VITALS && images.length > 1) {
-        try {
-            const collage = await generateCollage(images);
-            finalImages = [collage]; // Replace individual images with the collage
-        } catch (e) {
-            console.error("Failed to generate collage", e);
-            // Fallback to sending individual images if collage fails
-        }
-    }
-
     try {
-      await DB.createLog({
-        residentId: selectedResidentId,
-        residentName: resident?.name || 'Unknown',
-        staffName: 'Jane Doe', // Hardcoded for demo
-        category: category,
-        notes: notes,
-        imageUrls: finalImages,
-        aiGeneratedMessage: aiMessage
-      });
-      
-      setSubmitStatus('success');
-      
-      // Scroll to top
-      if (topRef.current) topRef.current.scrollIntoView({ behavior: 'smooth' });
+        // Run AI generation and Image Processing in PARALLEL to save time
+        const aiPromise = GeminiService.generateMessage(
+            resident?.name || 'Resident',
+            category,
+            notes
+        );
 
-      // Reset form after short delay
-      setTimeout(() => {
-        setSubmitStatus('idle');
-        setCategory(null);
-        setNotes('');
-        setImages([]);
-        setSelectedResidentId('');
-      }, 3000);
+        let imagePromise: Promise<string[]> = Promise.resolve(images);
+        
+        // Only collage if Vitals and > 1 image
+        if (category === UpdateCategory.VITALS && images.length > 1) {
+            imagePromise = generateCollage(images).then(collage => [collage]).catch(e => {
+                console.error("Collage failed, sending individual", e);
+                return images;
+            });
+        }
+
+        // Wait for both to finish
+        const [aiMessage, finalImages] = await Promise.all([aiPromise, imagePromise]);
+
+        await DB.createLog({
+            residentId: selectedResidentId,
+            residentName: resident?.name || 'Unknown',
+            staffName: 'Jane Doe', // Hardcoded for demo
+            category: category,
+            notes: notes,
+            imageUrls: finalImages,
+            aiGeneratedMessage: aiMessage
+        });
+        
+        setSubmitStatus('success');
+        
+        if (topRef.current) topRef.current.scrollIntoView({ behavior: 'smooth' });
+
+        setTimeout(() => {
+            setSubmitStatus('idle');
+            setCategory(null);
+            setNotes('');
+            setImages([]);
+            setSelectedResidentId('');
+        }, 3000);
 
     } catch (error: any) {
-      console.error(error);
-      setSubmitStatus('error');
-      setErrorMessage(error.message || "Failed to send update.");
+        console.error(error);
+        setSubmitStatus('error');
+        setErrorMessage(error.message || "Failed to send update.");
     } finally {
-      setIsSubmitting(false);
+        setIsSubmitting(false);
     }
   };
 
@@ -501,7 +528,7 @@ const StaffDashboard: React.FC = () => {
                     <>
                       <Loader2 className="w-6 h-6 animate-spin" />
                       <span>
-                          {category === UpdateCategory.VITALS && images.length > 1 ? 'Stitching & Sending...' : 'Polishing Message...'}
+                          {category === UpdateCategory.VITALS && images.length > 1 ? 'Stitching & Sending...' : 'Processing...'}
                       </span>
                     </>
                   ) : (

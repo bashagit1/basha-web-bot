@@ -81,6 +81,21 @@ export const MockDB = {
     });
   },
 
+  retryLog: (log: ActivityLog): Promise<void> => {
+      return new Promise((resolve) => {
+          // Update status to SENT in local storage
+          const stored = localStorage.getItem(STORAGE_KEY_LOGS);
+          if (stored) {
+              const logs = JSON.parse(stored);
+              const updatedLogs = logs.map((l: ActivityLog) => 
+                l.id === log.id ? { ...l, status: 'SENT' } : l
+              );
+              localStorage.setItem(STORAGE_KEY_LOGS, JSON.stringify(updatedLogs));
+          }
+          setTimeout(() => resolve(), 1000);
+      });
+  },
+
   deleteImageFromLog: (logId: string, imageUrl: string): Promise<void> => {
     return new Promise((resolve) => {
         const stored = localStorage.getItem(STORAGE_KEY_LOGS);

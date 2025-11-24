@@ -154,7 +154,6 @@ export const LiveDB = {
     let finalStatus = 'PENDING';
     
     // Check if we have anything to send (Text OR Images)
-    // We allow empty text if images are present.
     const hasMessage = logData.aiGeneratedMessage && logData.aiGeneratedMessage.trim() !== '';
     const hasImages = logData.imageUrls && logData.imageUrls.length > 0;
 
@@ -201,6 +200,39 @@ export const LiveDB = {
         timestamp: newLog.created_at,
         status: finalStatus as any
     };
+  },
+
+  retryLog: async (log: ActivityLog): Promise<void> => {
+     // Fetch resident group ID
+    const { data: residentData } = await supabase
+        .from('residents')
+        .select('whatsapp_group_id')
+        .eq('id', log.residentId)
+        .single();
+        
+    const residentGroupId = residentData?.whatsapp_group_id;
+
+    if (!residentGroupId) throw new Error("Resident has no WhatsApp Group");
+
+    const response = await fetch(`${BOT_SERVER_URL}/send-update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+        groupId: residentGroupId,
+        message: log.aiGeneratedMessage || '',
+        imageUrls: log.imageUrls
+        })
+    });
+
+    if (!response.ok) {
+        throw new Error("Retry failed. Bot rejected the request.");
+    }
+
+    // Update status to SENT
+    await supabase
+        .from('activity_logs')
+        .update({ status: 'SENT' })
+        .eq('id', log.id);
   },
 
   getLogs: async (): Promise<ActivityLog[]> => {

@@ -15,6 +15,7 @@ interface DatabaseInterface {
   deleteResident: (id: string) => Promise<void>;
   getLogs: () => Promise<ActivityLog[]>;
   createLog: (logData: Omit<ActivityLog, 'id' | 'timestamp' | 'status'>) => Promise<ActivityLog>;
+  retryLog: (log: ActivityLog) => Promise<void>;
   getWhatsAppGroups: () => Promise<WhatsAppGroup[]>;
   
   // Media Management
