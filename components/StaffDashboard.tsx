@@ -56,7 +56,7 @@ const StaffDashboard: React.FC = () => {
     }
   };
 
-  // --- SMART IMAGE RESIZER (High Quality, Low Size) ---
+  // --- SMART IMAGE RESIZER (Optimized for WhatsApp Batches) ---
   const resizeImage = (file: File): Promise<string> => {
     return new Promise((resolve) => {
         const reader = new FileReader();
@@ -66,8 +66,9 @@ const StaffDashboard: React.FC = () => {
             img.src = event.target?.result as string;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // Resize to HD (1280px width) - great for WhatsApp, fast for network
-                const maxWidth = 1280; 
+                // Reduced to 1024px: Visually identical on phones, but 50% smaller file size
+                // allowing batches of 6-10 images to send without timeout.
+                const maxWidth = 1024; 
                 const scaleSize = maxWidth / img.width;
                 const width = (img.width > maxWidth) ? maxWidth : img.width;
                 const height = (img.width > maxWidth) ? img.height * scaleSize : img.height;
@@ -77,8 +78,8 @@ const StaffDashboard: React.FC = () => {
                 const ctx = canvas.getContext('2d');
                 ctx?.drawImage(img, 0, 0, width, height);
                 
-                // JPEG at 0.85 quality is virtually indistinguishable but 10x smaller
-                resolve(canvas.toDataURL('image/jpeg', 0.85));
+                // JPEG at 0.70 quality is the sweet spot for WhatsApp speed
+                resolve(canvas.toDataURL('image/jpeg', 0.70));
             };
         };
     });
@@ -89,7 +90,7 @@ const StaffDashboard: React.FC = () => {
       const file = e.target.files[0];
       
       // Limit images based on category
-      const limit = category === UpdateCategory.VITALS ? 3 : 1;
+      const limit = category === UpdateCategory.VITALS ? 3 : 10; // Increased limit for general
       if (images.length >= limit) {
          alert(`Maximum ${limit} image(s) allowed for this category.`);
          return;
@@ -161,7 +162,7 @@ const StaffDashboard: React.FC = () => {
         currentX += drawWidth;
     });
 
-    return canvas.toDataURL('image/jpeg', 0.85);
+    return canvas.toDataURL('image/jpeg', 0.70);
   };
 
   const handleSubmit = async () => {
@@ -470,7 +471,7 @@ const StaffDashboard: React.FC = () => {
                         </div>
                       ))}
 
-                      {images.length < (category === UpdateCategory.VITALS ? 3 : 1) && (
+                      {images.length < (category === UpdateCategory.VITALS ? 3 : 10) && (
                         <div className="flex gap-3">
                             <label className="w-28 h-28 flex flex-col items-center justify-center border-2 border-dashed border-brand-300 dark:border-brand-700 bg-brand-50/50 dark:bg-brand-900/10 text-brand-600 dark:text-brand-400 rounded-2xl cursor-pointer hover:bg-brand-100 dark:hover:bg-brand-900/20 hover:border-brand-400 transition-all group">
                                 <Camera className="w-8 h-8 mb-1 group-hover:scale-110 transition-transform" />
