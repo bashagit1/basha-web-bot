@@ -77,8 +77,8 @@ const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     refreshData();
-    // Attempt to load groups silently on mount so they are ready for the Add Resident modal
-    loadGroupsSilently(); 
+    // Force a fresh scan of groups on mount to ensure the dropdown is populated
+    handleScanGroups(true); 
     startBotPolling();
     return () => stopBotPolling();
   }, [activeTab]);
@@ -121,14 +121,7 @@ const AdminDashboard: React.FC = () => {
   };
 
   const loadGroupsSilently = async () => {
-      try {
-          const groups = await DB.getWhatsAppGroups();
-          if (groups && groups.length > 0) {
-              setAvailableGroups(groups);
-          }
-      } catch (e) {
-          // Ignore errors on silent load
-      }
+      // Replaced by automatic handleScanGroups(true)
   };
 
   const openAddModal = () => {
@@ -136,8 +129,8 @@ const AdminDashboard: React.FC = () => {
     setNewResident({});
     setCurrentResidentId(null);
     setShowAddModal(true);
-    // Try refreshing groups when modal opens if we don't have any
-    if (availableGroups.length === 0) loadGroupsSilently();
+    // Refresh groups when modal opens
+    handleScanGroups(true);
   };
 
   const openEditModal = (resident: Resident) => {
@@ -145,7 +138,7 @@ const AdminDashboard: React.FC = () => {
     setNewResident(resident);
     setCurrentResidentId(resident.id);
     setShowAddModal(true);
-    if (availableGroups.length === 0) loadGroupsSilently();
+    handleScanGroups(true);
   };
 
   const handleSaveResident = async (e: React.FormEvent) => {
@@ -208,20 +201,20 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleScanGroups = async () => {
-    setIsScanningGroups(true);
+  const handleScanGroups = async (silent = false) => {
+    if (!silent) setIsScanningGroups(true);
     setScanError(null);
     try {
       const groups = await DB.getWhatsAppGroups();
-      setAvailableGroups(groups);
-      
-      if (groups.length === 0) {
+      if (groups && groups.length > 0) {
+        setAvailableGroups(groups);
+      } else if (!silent) {
         setScanError("No groups found. Please open WhatsApp on your phone, scroll through your chat list to sync, and try again.");
       }
     } catch (err: any) {
-      setScanError(err.message || "Could not scan groups. Is the bot running?");
+      if (!silent) setScanError(err.message || "Could not scan groups. Is the bot running?");
     } finally {
-      setIsScanningGroups(false);
+      if (!silent) setIsScanningGroups(false);
     }
   };
 
@@ -535,7 +528,7 @@ const AdminDashboard: React.FC = () => {
                 <div className="flex items-center justify-between mb-6">
                     <h3 className="text-lg font-bold text-slate-800 dark:text-white">Group Discovery</h3>
                     <button 
-                        onClick={handleScanGroups}
+                        onClick={() => handleScanGroups(false)}
                         disabled={isScanningGroups}
                         className="text-sm text-brand-600 dark:text-brand-400 font-bold hover:bg-brand-50 dark:hover:bg-brand-900/20 px-4 py-2 rounded-lg transition-colors flex items-center space-x-2"
                     >

@@ -3,21 +3,34 @@ import { Resident, ActivityLog, WhatsAppGroup } from '../types';
 import { BotStatusResponse } from './database';
 
 // CONFIGURATION
-// Helper to sanitize the URL (remove trailing slash if present)
-const getBotUrl = () => {
-  // Use casting to any to avoid TS errors in some environments if types aren't picked up
-  const env = (import.meta as any).env;
-  const url = env?.VITE_BOT_SERVER_URL || 'http://localhost:3001';
-  return url.endsWith('/') ? url.slice(0, -1) : url;
-};
+// We directly access import.meta.env properties to ensure Vite replaces them statically at build time.
+// If VITE_BOT_SERVER_URL is not set in Netlify, we fallback to the hardcoded Railway URL.
+const RAW_BOT_URL = (import.meta as any).env?.VITE_BOT_SERVER_URL || 'https://elderly-care-ai-production.up.railway.app';
+const BOT_SERVER_URL = RAW_BOT_URL.endsWith('/') ? RAW_BOT_URL.slice(0, -1) : RAW_BOT_URL;
 
-const env = (import.meta as any).env;
-const SUPABASE_URL = env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
-const SUPABASE_ANON_KEY = env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
-const BOT_SERVER_URL = getBotUrl();
+const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
+const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
 
 // Initialize Client
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// Helper function to retry fetches
+async function fetchWithRetry(url: string, options: RequestInit, retries = 3, backoff = 1000): Promise<Response> {
+    try {
+        const response = await fetch(url, options);
+        if (!response.ok && response.status >= 500) {
+            throw new Error(`Server Error: ${response.status}`);
+        }
+        return response;
+    } catch (error) {
+        if (retries > 0) {
+            console.warn(`Fetch failed, retrying in ${backoff}ms... (${retries} attempts left)`);
+            await new Promise(resolve => setTimeout(resolve, backoff));
+            return fetchWithRetry(url, options, retries - 1, backoff * 2);
+        }
+        throw error;
+    }
+}
 
 export const LiveDB = {
   
@@ -159,9 +172,10 @@ export const LiveDB = {
 
     if (residentGroupId && (hasMessage || hasImages)) {
       try {
-        console.log(`Attempting to send update via: ${BOT_SERVER_URL}/send-update`);
+        console.log(`Attempting to send update to: ${BOT_SERVER_URL}`);
         
-        const response = await fetch(`${BOT_SERVER_URL}/send-update`, {
+        // Use Fetch with Retry to handle sleeping servers or flaky networks
+        const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -180,8 +194,8 @@ export const LiveDB = {
       } catch (err: any) {
         console.warn(`Bot server unreachable at ${BOT_SERVER_URL}. Is it running?`, err);
         // Specialized error for "Failed to fetch" often meaning backend is sleeping/offline
-        if (err.message && err.message.includes('Failed to fetch')) {
-             console.error("CRITICAL: Backend Server likely offline or sleeping.");
+        if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('Server Error'))) {
+             console.error(`CRITICAL: Backend Server at ${BOT_SERVER_URL} is offline or sleeping.`);
         }
         finalStatus = 'FAILED';
       }
@@ -222,7 +236,7 @@ export const LiveDB = {
     }
 
     try {
-        const response = await fetch(`${BOT_SERVER_URL}/send-update`, {
+        const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -244,7 +258,7 @@ export const LiveDB = {
 
     } catch (err: any) {
         if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
-            throw new Error("Connection Refused: The Bot Server seems to be offline or sleeping. Please wake it up.");
+            throw new Error(`Connection Refused: The Bot Server (${BOT_SERVER_URL}) seems to be offline or sleeping. Please wake it up.`);
         }
         throw err;
     }
@@ -302,7 +316,10 @@ export const LiveDB = {
 
   getWhatsAppGroups: async (): Promise<WhatsAppGroup[]> => {
     try {
-        const response = await fetch(`${BOT_SERVER_URL}/groups`);
+        const response = await fetchWithRetry(`${BOT_SERVER_URL}/groups`, {
+            method: 'GET'
+        });
+        
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`Bot Server Error (${response.status}): ${errorText}`);
@@ -310,7 +327,7 @@ export const LiveDB = {
         return await response.json();
     } catch (e: any) {
         console.warn(`Bot server unreachable at ${BOT_SERVER_URL}`, e);
-        if (e.name === 'TypeError' && e.message === 'Failed to fetch') {
+        if (e.message && (e.message.includes('Failed to fetch') || e.message.includes('Server Error'))) {
              // Return empty array instead of throwing to prevent blocking the UI
              console.log("Bot server sleeping/offline, returning empty group list.");
              return [];
@@ -321,7 +338,7 @@ export const LiveDB = {
 
   checkBotStatus: async (): Promise<BotStatusResponse> => {
     try {
-        const response = await fetch(`${BOT_SERVER_URL}/status`);
+        const response = await fetchWithRetry(`${BOT_SERVER_URL}/status`, { method: 'GET' }, 1, 500); // Less retry for status
         if (!response.ok) throw new Error(`Status check failed with ${response.status}`);
         return await response.json();
     } catch (e) {
@@ -331,7 +348,7 @@ export const LiveDB = {
 
   getBotQR: async (): Promise<string | null> => {
     try {
-        const response = await fetch(`${BOT_SERVER_URL}/qr`);
+        const response = await fetchWithRetry(`${BOT_SERVER_URL}/qr`, { method: 'GET' });
         if (!response.ok) return null;
         const data = await response.json();
         return data.qr;

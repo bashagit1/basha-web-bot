@@ -15,38 +15,27 @@ export const GeminiService = {
   ): Promise<string> => {
     // API Key is assumed to be valid and available as per guidelines.
 
-    // 1. Logic for General Update:
-    // If it is 'General Update' and there are NO staff notes, do not generate a message.
-    // This allows staff to just upload a photo without AI inventing text.
-    if (category === 'General Update' && (!staffNotes || staffNotes.trim().length === 0)) {
-        return ""; // Return empty string. The logging system will skip sending text if this is empty.
+    // STRICT RULE: If staff did not provide notes, do NOT generate any AI text.
+    // This applies to ALL categories (Breakfast, Lunch, Vitals, etc.).
+    // Returning an empty string ensures only the image is sent.
+    if (!staffNotes || staffNotes.trim().length === 0) {
+        return ""; 
     }
 
-    let specificInstruction = "";
-
-    // 2. Logic to determine the strictness of the prompt
-    if (category === 'Vital Signs' || category === 'Glucose') {
-      specificInstruction = "Strictly write ONE short line. State that checks were done and status is stable (unless notes say otherwise). Example: 'Vital signs checked - everything looks normal.'";
-    } else if (staffNotes && staffNotes.trim().length > 0) {
-      specificInstruction = "The staff provided a specific note. Polish it to be professional and grammatically correct, but keep it VERY short. Do not add extra fluff. Max 1 sentence.";
-    } else {
-      // Default for Meals without notes
-      specificInstruction = `Write a very brief 1-sentence update about ${category}. Keep it under 12 words. Example: '${residentName} had a good appetite for breakfast.'`;
-    }
-
+    // If notes exist, ask AI to simply polish/correct them.
     const prompt = `
-      You are a care home assistant. Write a WhatsApp message for the family of "${residentName}".
+      You are a care home assistant. 
+      Refine the following raw notes from staff into a professional, warm, and concise WhatsApp message for the family of resident "${residentName}".
       
       Context:
       - Category: ${category}
       - Raw Input: "${staffNotes}"
       
-      Constraint: ${specificInstruction}
-      
-      Output Rules:
-      - NO headers.
-      - NO "Hello family".
-      - NO hashtags.
+      Rules:
+      - Fix grammar and spelling.
+      - Keep it short (max 1-2 sentences).
+      - Maintain the original meaning strictly.
+      - NO headers, NO hashtags, NO "Hello family".
       - Just the message text.
     `;
 
@@ -56,10 +45,11 @@ export const GeminiService = {
         model: 'gemini-2.5-flash',
         contents: prompt,
       });
-      return response.text || `Update: ${category} checked. ${staffNotes}`;
+      return response.text || staffNotes;
     } catch (error) {
       console.error("Error generating AI message:", error);
-      return `Update for ${residentName}: ${category}. ${staffNotes}`;
+      // Fallback to original notes if AI fails
+      return staffNotes;
     }
   }
 };
