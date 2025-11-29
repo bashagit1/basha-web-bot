@@ -11,14 +11,14 @@ const BOT_SERVER_URL = RAW_BOT_URL.endsWith('/') ? RAW_BOT_URL.slice(0, -1) : RA
 const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
 const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
 
-// Initialize Client
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// --- HELPER FUNCTIONS ---
 
-// Helper function to retry fetches
-async function fetchWithRetry(url: string, options: RequestInit, retries = 3, backoff = 1000): Promise<Response> {
+// Helper function to retry fetches (Moved up to be used by Supabase client)
+async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 3, backoff = 1000): Promise<Response> {
     try {
         const response = await fetch(url, options);
-        if (!response.ok && response.status >= 500) {
+        // Retry on 408 (Timeout) or 5xx (Server Error)
+        if (!response.ok && (response.status === 408 || response.status >= 500)) {
             throw new Error(`Server Error: ${response.status}`);
         }
         return response;
@@ -31,6 +31,19 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3, ba
         throw error;
     }
 }
+
+// Custom Fetch Wrapper for Supabase SDK to enable retries
+const supabaseFetch = (url: RequestInfo | URL, options?: RequestInit) => {
+    return fetchWithRetry(url.toString(), options || {});
+}
+
+// Initialize Client with Global Retry Logic
+// This helps prevent "Connection terminated" errors by retrying failed requests automatically.
+export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    global: {
+        fetch: supabaseFetch
+    }
+});
 
 export const LiveDB = {
   
