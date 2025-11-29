@@ -13,21 +13,29 @@ const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'e
 
 // --- HELPER FUNCTIONS ---
 
-// Helper function to retry fetches (Moved up to be used by Supabase client)
-async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 3, backoff = 1000): Promise<Response> {
+// Helper function to retry fetches with Exponential Backoff
+// Retries up to 10 times to handle Supabase "Cold Starts" and "Connection Timeouts"
+async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 10, backoff = 500): Promise<Response> {
     try {
         const response = await fetch(url, options);
-        // Retry on 408 (Timeout) or 5xx (Server Error)
-        if (!response.ok && (response.status === 408 || response.status >= 500)) {
-            throw new Error(`Server Error: ${response.status}`);
+        
+        // Retry on Server Errors (5xx) or Timeouts (408, 429)
+        // 502/503/504 are common when Supabase is under load or waking up
+        if (!response.ok && (response.status === 408 || response.status === 429 || response.status >= 500)) {
+            const msg = `Server Error: ${response.status} ${response.statusText}`;
+            console.warn(`[Network] ${msg}. Retrying...`);
+            throw new Error(msg);
         }
         return response;
-    } catch (error) {
+    } catch (error: any) {
         if (retries > 0) {
-            console.warn(`Fetch failed, retrying in ${backoff}ms... (${retries} attempts left)`);
+            // Exponential backoff: 500ms, 1000ms, 2000ms, 4000ms...
+            const nextBackoff = backoff * 2;
+            console.warn(`[Network] Fetch failed (${error.message}). Retrying in ${backoff}ms... (${retries} attempts left)`);
             await new Promise(resolve => setTimeout(resolve, backoff));
-            return fetchWithRetry(url, options, retries - 1, backoff * 2);
+            return fetchWithRetry(url, options, retries - 1, nextBackoff);
         }
+        console.error("[Network] All retry attempts failed.");
         throw error;
     }
 }
@@ -40,6 +48,10 @@ const supabaseFetch = (url: RequestInfo | URL, options?: RequestInit) => {
 // Initialize Client with Global Retry Logic
 // This helps prevent "Connection terminated" errors by retrying failed requests automatically.
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+    },
     global: {
         fetch: supabaseFetch
     }
