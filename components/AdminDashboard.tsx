@@ -86,7 +86,7 @@ const AdminDashboard: React.FC = () => {
   const startBotPolling = () => {
     checkBot();
     if (pollInterval.current) clearInterval(pollInterval.current);
-    pollInterval.current = setInterval(checkBot, 3000);
+    pollInterval.current = setInterval(checkBot, 10000); // Polling increased to 10s to prevent server overload
   };
 
   const stopBotPolling = () => {

@@ -6,7 +6,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start:bot": "node --max-old-space-size=1024 server/bot.js"
+    "start:bot": "node server/bot.js"
   },
   "dependencies": {
     "react": "^18.3.1",

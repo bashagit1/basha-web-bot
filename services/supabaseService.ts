@@ -14,8 +14,8 @@ const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'e
 // --- HELPER FUNCTIONS ---
 
 // Helper function to retry fetches with Exponential Backoff
-// Retries up to 10 times to handle Supabase "Cold Starts" and "Connection Timeouts"
-async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 10, backoff = 500): Promise<Response> {
+// Retries up to 5 times (approx 30s total) to handle Supabase "Cold Starts" and "Connection Timeouts"
+async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 5, backoff = 1000): Promise<Response> {
     try {
         const response = await fetch(url, options);
         
@@ -29,7 +29,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 
         return response;
     } catch (error: any) {
         if (retries > 0) {
-            // Exponential backoff: 500ms, 1000ms, 2000ms, 4000ms...
+            // Exponential backoff: 1s, 2s, 4s, 8s, 16s
             const nextBackoff = backoff * 2;
             console.warn(`[Network] Fetch failed (${error.message}). Retrying in ${backoff}ms... (${retries} attempts left)`);
             await new Promise(resolve => setTimeout(resolve, backoff));
@@ -293,7 +293,8 @@ export const LiveDB = {
     const { data, error } = await supabase
       .from('activity_logs')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .limit(50); // LIMIT REDUCED to 50: Prevents "statement timeout" due to large payloads.
 
     if (error) {
       console.error('Supabase Error fetching logs:', error);
