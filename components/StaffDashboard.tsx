@@ -66,7 +66,7 @@ const StaffDashboard: React.FC = () => {
             img.src = event.target?.result as string;
             img.onload = () => {
                 const canvas = document.createElement('canvas');
-                // Reduced to 1024px: Visually identical on phones, but 50% smaller file size
+                // Reduced to 1024px: Visually identical on phones, but smaller file size
                 // allowing batches of 6-10 images to send without timeout.
                 const maxWidth = 1024; 
                 const scaleSize = maxWidth / img.width;
@@ -78,8 +78,9 @@ const StaffDashboard: React.FC = () => {
                 const ctx = canvas.getContext('2d');
                 ctx?.drawImage(img, 0, 0, width, height);
                 
-                // JPEG at 0.70 quality is the sweet spot for WhatsApp speed
-                resolve(canvas.toDataURL('image/jpeg', 0.70));
+                // JPEG at 0.50 quality drastically reduces payload size (~100KB per image)
+                // This fixes the "Failed to fetch" error caused by massive payloads.
+                resolve(canvas.toDataURL('image/jpeg', 0.50));
             };
         };
     });
@@ -162,7 +163,7 @@ const StaffDashboard: React.FC = () => {
         currentX += drawWidth;
     });
 
-    return canvas.toDataURL('image/jpeg', 0.70);
+    return canvas.toDataURL('image/jpeg', 0.50);
   };
 
   const handleSubmit = async () => {
@@ -529,7 +530,7 @@ const StaffDashboard: React.FC = () => {
                     <>
                       <Loader2 className="w-6 h-6 animate-spin" />
                       <span>
-                          {category === UpdateCategory.VITALS && images.length > 1 ? 'Stitching & Sending...' : 'Processing...'}
+                          {category === UpdateCategory.VITALS && images.length > 1 ? 'Stitching & Sending...' : 'Sending...'}
                       </span>
                     </>
                   ) : (

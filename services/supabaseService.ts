@@ -16,7 +16,7 @@ const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'e
 // Helper function to retry fetches with Exponential Backoff
 async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 5, backoff = 1000): Promise<Response> {
     try {
-        const response = await fetch(url, options);
+        const response = await fetch(url, { ...options, keepalive: true });
         
         // Retry on Server Errors (5xx) or Timeouts (408, 429)
         if (!response.ok && (response.status === 408 || response.status === 429 || response.status >= 500)) {
@@ -191,6 +191,7 @@ export const LiveDB = {
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          keepalive: true, // IMPORTANT: Prevents browser from killing connection on heavy load
           body: JSON.stringify({
             groupId: residentGroupId,
             message: logData.aiGeneratedMessage || '', 
@@ -202,6 +203,9 @@ export const LiveDB = {
             finalStatus = 'SENT';
         } else {
             console.warn(`Bot server responded with ${response.status}: ${response.statusText}`);
+            if (response.status === 413) {
+                 console.error("CRITICAL: Payload too large for Bot Server. Check image resizing.");
+            }
             finalStatus = 'FAILED';
         }
       } catch (err: any) {
@@ -248,6 +252,7 @@ export const LiveDB = {
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            keepalive: true,
             body: JSON.stringify({
             groupId: residentGroupId,
             message: log.aiGeneratedMessage || '',
