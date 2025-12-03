@@ -16,7 +16,9 @@ const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'e
 // Helper function to retry fetches with Exponential Backoff
 async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 5, backoff = 1000): Promise<Response> {
     try {
-        const response = await fetch(url, { ...options, keepalive: true });
+        // Removed keepalive: true because it imposes a 64KB limit on payloads in Chrome,
+        // which breaks image uploads.
+        const response = await fetch(url, { ...options });
         
         // Retry on Server Errors (5xx) or Timeouts (408, 429)
         if (!response.ok && (response.status === 408 || response.status === 429 || response.status >= 500)) {
@@ -191,7 +193,7 @@ export const LiveDB = {
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          keepalive: true, // IMPORTANT: Prevents browser from killing connection on heavy load
+          // Removed keepalive: true to prevent 64KB limit error
           body: JSON.stringify({
             groupId: residentGroupId,
             message: logData.aiGeneratedMessage || '', 
@@ -252,7 +254,7 @@ export const LiveDB = {
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            keepalive: true,
+            // Removed keepalive: true here as well
             body: JSON.stringify({
             groupId: residentGroupId,
             message: log.aiGeneratedMessage || '',
