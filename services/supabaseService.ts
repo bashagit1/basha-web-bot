@@ -3,16 +3,10 @@ import { Resident, ActivityLog, WhatsAppGroup } from '../types';
 import { BotStatusResponse } from './database';
 
 // CONFIGURATION
-// Smart URL Detection:
-// 1. If we are running on localhost (dev), use http://localhost:3001
-// 2. Otherwise (production/Netlify), use the Railway URL
-const RAILWAY_URL = 'https://elderly-care-ai-production.up.railway.app';
-const isLocal = typeof window !== 'undefined' && window.location.hostname === 'localhost';
-
-// Remove trailing slash if present for Railway URL
-const CLEAN_RAILWAY_URL = RAILWAY_URL.endsWith('/') ? RAILWAY_URL.slice(0, -1) : RAILWAY_URL;
-
-const BOT_SERVER_URL = isLocal ? 'http://localhost:3001' : CLEAN_RAILWAY_URL;
+// Since Railway server is removed, we default to Localhost.
+// NOTE: If you deploy the frontend to Netlify (HTTPS), it cannot talk to Localhost (HTTP).
+// You must run the frontend locally using 'npm run dev' to connect to this server.
+const BOT_SERVER_URL = 'http://localhost:3001';
 
 const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
 const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
@@ -272,7 +266,7 @@ export const LiveDB = {
 
     } catch (err: any) {
         if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
-            throw new Error(`Connection Refused: The Bot Server (${BOT_SERVER_URL}) seems to be offline or sleeping. Please wake it up.`);
+            throw new Error(`Connection Refused: The Bot Server (${BOT_SERVER_URL}) seems to be offline. Ensure 'node server/bot.js' is running.`);
         }
         throw err;
     }
@@ -340,7 +334,7 @@ export const LiveDB = {
     } catch (e: any) {
         console.warn(`Bot server unreachable at ${BOT_SERVER_URL}`, e);
         if (e.message && (e.message.includes('Failed to fetch') || e.message.includes('Server Error'))) {
-             console.log("Bot server sleeping/offline, returning empty group list.");
+             console.log("Bot server offline.");
              return [];
         }
         throw new Error("Could not fetch groups. Check if the Bot is Online.");
@@ -349,7 +343,6 @@ export const LiveDB = {
 
   checkBotStatus: async (): Promise<BotStatusResponse> => {
     try {
-        // Increased retry count (3) and timeout for status check to allow Railway wakeup
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/status`, { method: 'GET' }, 3, 2000); 
         if (!response.ok) throw new Error(`Status check failed with ${response.status}`);
         return await response.json();

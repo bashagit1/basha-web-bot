@@ -6,7 +6,8 @@ const require = createRequire(import.meta.url);
  * 
  * Instructions:
  * 1. Install dependencies: npm install
- * 2. Run: node server/bot.js
+ * 2. Create a .env file with SUPABASE_URL and SUPABASE_ANON_KEY
+ * 3. Run: node server/bot.js
  */
 
 // --- DEPENDENCY CHECK ---
@@ -26,10 +27,8 @@ try {
 } catch (e) {
     console.error('\n\n❌ ERROR: MISSING DEPENDENCIES ❌');
     console.error('-----------------------------------');
-    console.error('The "whatsapp-web.js" or other libraries are missing.');
-    console.error('Please run the following command in your terminal to fix this:');
+    console.error('Please run the following command:');
     console.error('\n    npm install\n');
-    console.error('Then try running the bot again.');
     console.error('-----------------------------------\n');
     process.exit(1);
 }
@@ -39,27 +38,32 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Robust CORS to allow Netlify frontend
+// Robust CORS to allow Localhost frontend
 app.use(cors({
-    origin: '*', // Allow all origins for simplicity in this setup
+    origin: '*', 
     methods: ['GET', 'POST'],
     allowedHeaders: ['Content-Type']
 }));
 
-// Increase limit for base64 images to avoid PayloadTooLargeError
+// Increase limit for base64 images
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // --- IMMEDIATE SERVER START ---
-// We start the web server immediately so the frontend knows we are "Online"
-// even if WhatsApp takes a while to initialize.
 app.listen(PORT, () => {
-    console.log(`✅ AI Agent Server running immediately on port ${PORT}`);
+    console.log(`✅ AI Agent Server running locally on port ${PORT}`);
+    console.log(`   Frontend should be running via 'npm run dev' to connect.`);
 });
 
 // --- SUPABASE MAINTENANCE SETUP ---
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
+
+if (!process.env.SUPABASE_URL && !process.env.SUPABASE_ANON_KEY) {
+    console.warn("\n⚠️  WARNING: SUPABASE KEYS MISSING IN .env FILE");
+    console.warn("   Auto-cleanup of old images will not work.");
+    console.warn("   Please create a .env file with SUPABASE_URL and SUPABASE_ANON_KEY.\n");
+}
 
 let supabase = null;
 if (createClient) {
@@ -77,16 +81,17 @@ const jobQueue = [];
 let isProcessingQueue = false;
 let lastJobStartTime = 0; // Timestamp to track stuck jobs
 
-// --- SCHEDULED MAINTENANCE (THE "DEEP" FIX) ---
-// 1. Puppeteer Memory Cleanup (Every 24 Hours)
-setInterval(() => {
-    console.log('[MAINTENANCE] Performing daily scheduled restart to clean memory...');
-    process.exit(0); // Railway will restart it fresh
-}, 24 * 60 * 60 * 1000); 
+// --- SCHEDULED MAINTENANCE ---
 
-// 2. Database Image Cleanup (Every 1 Hour)
+// 1. Database Image Cleanup (Every 1 Hour)
 setInterval(async () => {
     if (!supabase) return;
+
+    // Trigger Garbage Collection if exposed (via --expose-gc)
+    if (global.gc) {
+        console.log('[MAINTENANCE] Running Garbage Collection...');
+        global.gc();
+    }
 
     console.log('[MAINTENANCE] Running 15-Hour Image Cleanup...');
     const timeLimit = new Date(Date.now() - 15 * 60 * 60 * 1000).toISOString();
@@ -108,6 +113,19 @@ setInterval(async () => {
 }, 60 * 60 * 1000);
 
 
+// 2. Keep-Alive Ping (Every 4 Hours)
+setInterval(async () => {
+    if (isReady && client) {
+        console.log('[MAINTENANCE] Sending Keep-Alive Ping...');
+        try {
+            await client.getState(); 
+        } catch (e) {
+            console.warn('[MAINTENANCE] Keep-Alive failed:', e.message);
+        }
+    }
+}, 4 * 60 * 60 * 1000);
+
+
 // --- HEARTBEAT & SELF-HEALING (WATCHDOG) ---
 setInterval(async () => {
     const memUsage = process.memoryUsage();
@@ -119,9 +137,9 @@ setInterval(async () => {
     // WATCHDOG: Check for STUCK JOBS
     if (isProcessingQueue && lastJobStartTime > 0) {
         const duration = Date.now() - lastJobStartTime;
-        if (duration > 120000) { 
+        if (duration > 180000) { // 3 minutes
             console.error(`[WATCHDOG] 🚨 CRITICAL: Job stuck for ${Math.round(duration/1000)}s. Browser likely frozen.`);
-            console.error('[WATCHDOG] Force restarting server to clear fault...');
+            console.error('[WATCHDOG] Force restarting server...');
             process.exit(1); 
         }
     }
@@ -130,7 +148,7 @@ setInterval(async () => {
     if (isReady && client) {
         try {
             const statePromise = client.getState();
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000));
             await Promise.race([statePromise, timeoutPromise]);
         } catch (e) {
             console.error('[HEARTBEAT] Client unresponsive/timeout. Force Restarting...', e.message);
@@ -145,7 +163,7 @@ async function startWhatsApp() {
     
     try {
         client = new Client({
-            authStrategy: new LocalAuth(),
+            authStrategy: new LocalAuth(), // LocalAuth saves session to ./wwebjs_auth
             puppeteer: {
                 args: [
                     '--no-sandbox', 
@@ -163,7 +181,7 @@ async function startWhatsApp() {
                     '--metrics-recording-only'
                 ],
                 headless: true,
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36'
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             }
         });
 
@@ -189,7 +207,6 @@ async function startWhatsApp() {
         client.on('auth_failure', (msg) => {
             console.error('❌ AUTHENTICATION FAILURE', msg);
             isReady = false;
-            // Fatal error, we should probably restart
             process.exit(1);
         });
 
@@ -205,7 +222,6 @@ async function startWhatsApp() {
     } catch (err) {
         console.error("Client initialization failed. Retrying in 10 seconds...", err);
         isReady = false;
-        // Retry logic instead of hard crash
         setTimeout(startWhatsApp, 10000);
     }
 }
@@ -218,7 +234,6 @@ startWhatsApp();
 async function processQueue() {
     if (isProcessingQueue || jobQueue.length === 0) return;
 
-    // Safety check
     if (!client) {
         console.warn('[QUEUE] Client not defined yet. Waiting...');
         setTimeout(processQueue, 2000);
@@ -239,6 +254,7 @@ async function processQueue() {
     } finally {
         isProcessingQueue = false;
         lastJobStartTime = 0; 
+        if (global.gc) { global.gc(); }
         setTimeout(processQueue, 1000); 
     }
 }
@@ -270,7 +286,6 @@ async function processJob(job) {
                     const timeoutPromise = new Promise((_, reject) => 
                         setTimeout(() => reject(new Error('Timeout sending image')), 20000)
                     );
-                    
                     await Promise.race([sendPromise, timeoutPromise]);
                     console.log(`[QUEUE] Sent image ${i + 1}/${imageUrls.length}`);
                 }
@@ -278,10 +293,8 @@ async function processJob(job) {
                 console.error(`[QUEUE] Error sending image ${i+1}:`, imgErr.message);
             } finally {
                 media = null; 
-                if (global.gc) { global.gc(); } 
             }
-            
-            await new Promise(r => setTimeout(r, 2000));
+            await new Promise(r => setTimeout(r, 1000));
         }
     }
 
@@ -301,7 +314,7 @@ async function processJob(job) {
 
 app.get('/', (req, res) => {
     const uptime = process.uptime();
-    res.send(`Elderly Care Watch AI Bot Server is Running! Uptime: ${Math.floor(uptime)}s | Queue: ${jobQueue.length}`);
+    res.send(`Elderly Care Watch AI Bot Server is Running Locally! Uptime: ${Math.floor(uptime)}s | Queue: ${jobQueue.length}`);
 });
 
 app.get('/status', (req, res) => {
@@ -348,8 +361,6 @@ app.get('/groups', async (req, res) => {
 });
 
 app.post('/send-update', (req, res) => {
-    // If client is initializing, we might still want to queue the job?
-    // But safest is to say 503 if not ready.
     if (!isReady) {
         return res.status(503).json({ error: 'WhatsApp not connected' });
     }
