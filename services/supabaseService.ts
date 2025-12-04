@@ -41,18 +41,33 @@ const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'e
 
 // --- HELPER FUNCTIONS ---
 
+// Safe header normalization to handle plain objects, Headers instances, or Arrays
+const normalizeHeaders = (headersInit?: HeadersInit): Record<string, string> => {
+    const headers: Record<string, string> = {};
+    if (!headersInit) return headers;
+    
+    if (headersInit instanceof Headers) {
+        headersInit.forEach((value, key) => {
+            headers[key] = value;
+        });
+    } else if (Array.isArray(headersInit)) {
+        headersInit.forEach(([key, value]) => {
+            headers[key] = value;
+        });
+    } else if (typeof headersInit === 'object') {
+        Object.assign(headers, headersInit);
+    }
+    return headers;
+};
+
 // Helper function to retry fetches with Exponential Backoff
 async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 3, backoff = 1000): Promise<Response> {
     try {
-        // Removed keepalive: true because it imposes a 64KB limit on payloads in Chrome,
-        // which breaks image uploads.
-        // Added ngrok-skip-browser-warning header to bypass Ngrok's splash screen
-        const headers = { 
-            ...options.headers, 
-            'ngrok-skip-browser-warning': 'true' 
-        };
+        // Fix: Properly merge headers preventing "No API key found" error if Supabase sends Headers object
+        const mergedHeaders = normalizeHeaders(options.headers);
+        mergedHeaders['ngrok-skip-browser-warning'] = 'true';
         
-        const response = await fetch(url, { ...options, headers });
+        const response = await fetch(url, { ...options, headers: mergedHeaders });
         
         // Retry on Server Errors (5xx) or Timeouts (408, 429)
         if (!response.ok && (response.status === 408 || response.status === 429 || response.status >= 500)) {
