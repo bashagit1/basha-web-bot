@@ -42,7 +42,7 @@ const PORT = process.env.PORT || 3001;
 app.use(cors({
     origin: '*', 
     methods: ['GET', 'POST'],
-    allowedHeaders: ['Content-Type']
+    allowedHeaders: ['Content-Type', 'ngrok-skip-browser-warning']
 }));
 
 // Increase limit for base64 images to 500mb to prevent "Payload Too Large" errors
@@ -53,11 +53,10 @@ app.use(express.urlencoded({ limit: '500mb', extended: true }));
 // CRITICAL FIX: Listen on '0.0.0.0' to allow connections from external devices (Phones) on the same WiFi.
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ AI Agent Server running on port ${PORT}`);
-    if (process.env.RAILWAY_STATIC_URL) {
-        console.log(`   Public URL: https://${process.env.RAILWAY_STATIC_URL}`);
-    } else {
-        console.log(`   Accessible locally via IP (e.g. 192.168.x.x:3001).`);
-    }
+    console.log(`   - Local:   http://localhost:${PORT}`);
+    console.log(`   - Network: http://[YOUR_PC_IP]:${PORT}`);
+    console.log(`\n💡 TIP: For stable mobile access, use Ngrok:`);
+    console.log(`   Run: ngrok http ${PORT}`);
 });
 
 // --- SUPABASE MAINTENANCE SETUP ---
@@ -328,6 +327,11 @@ async function processJob(job) {
 
 
 // --- API ENDPOINTS ---
+
+// PING Endpoint for testing Ngrok
+app.get('/ping', (req, res) => {
+    res.send('pong');
+});
 
 app.get('/', (req, res) => {
     const uptime = process.uptime();

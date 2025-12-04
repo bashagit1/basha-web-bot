@@ -5,22 +5,36 @@ import { BotStatusResponse } from './database';
 // CONFIGURATION
 
 // DYNAMIC URL DETECTION
-// This automatically switches between Localhost (Dev) and Railway (Prod)
+// 1. Check for manual override (Ngrok/Tunnel)
+// 2. Check for Localhost
+// 3. Default to Railway/Prod
 const getBotServerUrl = () => {
+    // Allows user to paste Ngrok URL in .env to fix mobile issues
+    const overrideUrl = (import.meta as any).env?.VITE_BOT_OVERRIDE_URL;
+    if (overrideUrl) {
+        return overrideUrl;
+    }
+
     const hostname = window.location.hostname;
     
-    // 1. If running on Localhost or Local IP, look for local bot
+    // If running on Localhost or Local IP, look for local bot
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
         return `http://${hostname}:3001`; // Port 3001 on the same machine
     }
     
-    // 2. If running on Netlify (Production), look for Railway
-    // REPLACE THIS WITH YOUR NEW RAILWAY URL AFTER DEPLOYING
+    // Default Fallback
     return 'https://elderly-care-ai-production.up.railway.app';
 };
 
 const BOT_SERVER_URL = getBotServerUrl();
 console.log(`[Config] Bot Server URL set to: ${BOT_SERVER_URL}`);
+
+// WARN USER IF USING NETLIFY TO ACCESS LOCALHOST
+if (window.location.hostname.includes('netlify.app') && BOT_SERVER_URL.includes('localhost')) {
+    console.error("CRITICAL CONFIG ERROR: You are trying to access a Localhost Server from a Netlify (HTTPS) Website.");
+    console.error("This will fail due to Mixed Content Security.");
+    console.error("FIX: Either run the frontend locally (npm run dev) OR use Ngrok to tunnel your server.");
+}
 
 const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
 const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
@@ -32,7 +46,13 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 
     try {
         // Removed keepalive: true because it imposes a 64KB limit on payloads in Chrome,
         // which breaks image uploads.
-        const response = await fetch(url, { ...options });
+        // Added ngrok-skip-browser-warning header to bypass Ngrok's splash screen
+        const headers = { 
+            ...options.headers, 
+            'ngrok-skip-browser-warning': 'true' 
+        };
+        
+        const response = await fetch(url, { ...options, headers });
         
         // Retry on Server Errors (5xx) or Timeouts (408, 429)
         if (!response.ok && (response.status === 408 || response.status === 429 || response.status >= 500)) {
