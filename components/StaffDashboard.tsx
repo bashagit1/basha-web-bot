@@ -56,33 +56,41 @@ const StaffDashboard: React.FC = () => {
     }
   };
 
-  // --- SMART IMAGE RESIZER (Optimized for WhatsApp Batches) ---
+  // --- SMART IMAGE RESIZER (Mobile Optimized) ---
   const resizeImage = (file: File): Promise<string> => {
     return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = (event) => {
-            const img = new Image();
-            img.src = event.target?.result as string;
-            img.onload = () => {
-                const canvas = document.createElement('canvas');
-                // Reduced to 1024px: Visually identical on phones, but smaller file size
-                // allowing batches of 6-10 images to send without timeout.
-                const maxWidth = 1024; 
-                const scaleSize = maxWidth / img.width;
-                const width = (img.width > maxWidth) ? maxWidth : img.width;
-                const height = (img.width > maxWidth) ? img.height * scaleSize : img.height;
+        // use URL.createObjectURL for much faster loading on mobile devices
+        const img = new Image();
+        const objectUrl = URL.createObjectURL(file);
+        
+        img.onload = () => {
+            const canvas = document.createElement('canvas');
+            
+            // Reduced to 800px: Perfect for WhatsApp, extremely fast upload
+            // Payload becomes ~50KB-80KB per image
+            const maxWidth = 800; 
+            const scaleSize = maxWidth / img.width;
+            const width = (img.width > maxWidth) ? maxWidth : img.width;
+            const height = (img.width > maxWidth) ? img.height * scaleSize : img.height;
 
-                canvas.width = width;
-                canvas.height = height;
-                const ctx = canvas.getContext('2d');
-                ctx?.drawImage(img, 0, 0, width, height);
-                
-                // JPEG at 0.50 quality drastically reduces payload size (~100KB per image)
-                // This fixes the "Failed to fetch" error caused by massive payloads.
-                resolve(canvas.toDataURL('image/jpeg', 0.50));
-            };
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx?.drawImage(img, 0, 0, width, height);
+            
+            // Clean up memory immediately
+            URL.revokeObjectURL(objectUrl);
+            
+            // JPEG at 0.40 quality is visually fine for phone screens but very light
+            resolve(canvas.toDataURL('image/jpeg', 0.40));
         };
+        
+        img.onerror = () => {
+            URL.revokeObjectURL(objectUrl);
+            resolve(""); // Skip broken images
+        };
+
+        img.src = objectUrl;
     });
   };
 
@@ -91,7 +99,7 @@ const StaffDashboard: React.FC = () => {
       const file = e.target.files[0];
       
       // Limit images based on category
-      const limit = category === UpdateCategory.VITALS ? 3 : 10; // Increased limit for general
+      const limit = category === UpdateCategory.VITALS ? 3 : 10; 
       if (images.length >= limit) {
          alert(`Maximum ${limit} image(s) allowed for this category.`);
          return;
@@ -100,7 +108,11 @@ const StaffDashboard: React.FC = () => {
       try {
         // Resize immediately upon selection
         const resizedBase64 = await resizeImage(file);
-        setImages(prev => [...prev, resizedBase64]);
+        if (resizedBase64) {
+            setImages(prev => [...prev, resizedBase64]);
+        } else {
+            alert("Failed to process image. Please try again.");
+        }
       } catch (err) {
         console.error("Error processing image", err);
         alert("Could not process image. Try again.");
@@ -123,7 +135,7 @@ const StaffDashboard: React.FC = () => {
     );
 
     // Target height for normalization
-    const targetHeight = 800; // Optimized height
+    const targetHeight = 800; 
     let totalWidth = 0;
 
     // Calculate total width needed
@@ -163,7 +175,7 @@ const StaffDashboard: React.FC = () => {
         currentX += drawWidth;
     });
 
-    return canvas.toDataURL('image/jpeg', 0.50);
+    return canvas.toDataURL('image/jpeg', 0.40);
   };
 
   const handleSubmit = async () => {
