@@ -81,8 +81,8 @@ const StaffDashboard: React.FC = () => {
             // Clean up memory immediately
             URL.revokeObjectURL(objectUrl);
             
-            // JPEG at 0.40 quality is visually fine for phone screens but very light
-            resolve(canvas.toDataURL('image/jpeg', 0.40));
+            // JPEG at 0.35 quality is visually acceptable for WhatsApp but lightning fast
+            resolve(canvas.toDataURL('image/jpeg', 0.35));
         };
         
         img.onerror = () => {
@@ -175,7 +175,7 @@ const StaffDashboard: React.FC = () => {
         currentX += drawWidth;
     });
 
-    return canvas.toDataURL('image/jpeg', 0.40);
+    return canvas.toDataURL('image/jpeg', 0.35);
   };
 
   const handleSubmit = async () => {

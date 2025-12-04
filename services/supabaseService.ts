@@ -3,10 +3,24 @@ import { Resident, ActivityLog, WhatsAppGroup } from '../types';
 import { BotStatusResponse } from './database';
 
 // CONFIGURATION
-// Since Railway server is removed, we default to Localhost.
-// NOTE: If you deploy the frontend to Netlify (HTTPS), it cannot talk to Localhost (HTTP).
-// You must run the frontend locally using 'npm run dev' to connect to this server.
-const BOT_SERVER_URL = 'http://localhost:3001';
+
+// DYNAMIC URL DETECTION
+// This allows you to access the app from your phone on the same WiFi (e.g., http://192.168.1.5:5173)
+// and have it automatically talk to the bot server on your PC (http://192.168.1.5:3001).
+const getBotServerUrl = () => {
+    const hostname = window.location.hostname;
+    
+    // If running on localhost/127.0.0.1, assume bot is on localhost:3001
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+        return 'http://localhost:3001';
+    }
+    
+    // If running on a local network IP (e.g., 192.168.x.x), assume bot is on the same IP port 3001
+    // This fixes the "Failed to fetch" error on mobile devices.
+    return `http://${hostname}:3001`;
+};
+
+const BOT_SERVER_URL = getBotServerUrl();
 
 const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
 const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
@@ -14,7 +28,7 @@ const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'e
 // --- HELPER FUNCTIONS ---
 
 // Helper function to retry fetches with Exponential Backoff
-async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 5, backoff = 1000): Promise<Response> {
+async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 3, backoff = 1000): Promise<Response> {
     try {
         // Removed keepalive: true because it imposes a 64KB limit on payloads in Chrome,
         // which breaks image uploads.
@@ -41,7 +55,7 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 
 
 // Custom Fetch Wrapper for Supabase SDK to enable retries
 const supabaseFetch = (url: RequestInfo | URL, options?: RequestInit) => {
-    return fetchWithRetry(url.toString(), options || {});
+    return fetchWithRetry(url.toString(), options || {}, 5, 1000);
 }
 
 // Initialize Client with Global Retry Logic
@@ -190,16 +204,17 @@ export const LiveDB = {
       try {
         console.log(`Attempting to send update to: ${BOT_SERVER_URL}`);
         
+        // Reduced retries for sending updates to fail faster on network errors
+        // so the user knows immediately if something is wrong.
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          // Removed keepalive: true to prevent 64KB limit error
           body: JSON.stringify({
             groupId: residentGroupId,
             message: logData.aiGeneratedMessage || '', 
             imageUrls: logData.imageUrls
           })
-        });
+        }, 2, 500); // 2 retries, 500ms backoff
 
         if (response.ok) {
             finalStatus = 'SENT';
@@ -213,7 +228,7 @@ export const LiveDB = {
       } catch (err: any) {
         console.warn(`Bot server unreachable at ${BOT_SERVER_URL}`, err);
         if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('Server Error'))) {
-             console.error(`CRITICAL: Backend Server at ${BOT_SERVER_URL} is offline or sleeping.`);
+             console.error(`CRITICAL: Backend Server at ${BOT_SERVER_URL} is offline or unreachable.`);
         }
         finalStatus = 'FAILED';
       }
@@ -254,13 +269,12 @@ export const LiveDB = {
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            // Removed keepalive: true here as well
             body: JSON.stringify({
             groupId: residentGroupId,
             message: log.aiGeneratedMessage || '',
             imageUrls: log.imageUrls
             })
-        });
+        }, 2, 500);
 
         if (!response.ok) {
             throw new Error("Retry failed. Bot rejected the request.");
@@ -273,7 +287,7 @@ export const LiveDB = {
 
     } catch (err: any) {
         if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
-            throw new Error(`Connection Refused: The Bot Server (${BOT_SERVER_URL}) seems to be offline. Ensure 'node server/bot.js' is running.`);
+            throw new Error(`Connection Refused: The Bot Server (${BOT_SERVER_URL}) seems to be offline. Ensure 'npm run start:bot' is running on your PC.`);
         }
         throw err;
     }
@@ -331,7 +345,7 @@ export const LiveDB = {
     try {
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/groups`, {
             method: 'GET'
-        });
+        }, 2, 1000);
         
         if (!response.ok) {
             const errorText = await response.text();
@@ -350,7 +364,7 @@ export const LiveDB = {
 
   checkBotStatus: async (): Promise<BotStatusResponse> => {
     try {
-        const response = await fetchWithRetry(`${BOT_SERVER_URL}/status`, { method: 'GET' }, 3, 2000); 
+        const response = await fetchWithRetry(`${BOT_SERVER_URL}/status`, { method: 'GET' }, 2, 1000); 
         if (!response.ok) throw new Error(`Status check failed with ${response.status}`);
         return await response.json();
     } catch (e) {
