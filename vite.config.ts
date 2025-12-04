@@ -8,6 +8,11 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    // Allow access from network (e.g. Phone)
+    server: {
+      host: true, 
+      port: 5173
+    },
     build: {
       outDir: 'dist',
       sourcemap: false

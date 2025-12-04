@@ -53,7 +53,7 @@ app.use(express.urlencoded({ limit: '500mb', extended: true }));
 // CRITICAL FIX: Listen on '0.0.0.0' to allow connections from external devices (Phones) on the same WiFi.
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ AI Agent Server running locally on port ${PORT}`);
-    console.log(`   Accessible to network devices via your PC's IP address.`);
+    console.log(`   Accessible to network devices via your PC's IP address (e.g. 192.168.x.x:3001).`);
 });
 
 // --- SUPABASE MAINTENANCE SETUP ---

@@ -9,6 +9,13 @@ import { BotStatusResponse } from './database';
 // and have it automatically talk to the bot server on your PC (http://192.168.1.5:3001).
 const getBotServerUrl = () => {
     const hostname = window.location.hostname;
+    const protocol = window.location.protocol;
+
+    // Check for Mixed Content Error (Netlify HTTPS -> Localhost HTTP)
+    if (protocol === 'https:' && !hostname.includes('localhost') && !hostname.includes('127.0.0.1')) {
+        console.error("CRITICAL: You are on HTTPS (Netlify) but trying to connect to a Local Bot Server.");
+        console.error("FIX: You must run the frontend LOCALLY (npm run dev) and access via http://localhost:5173 or http://YOUR_IP:5173");
+    }
     
     // If running on localhost/127.0.0.1, assume bot is on localhost:3001
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
@@ -21,6 +28,7 @@ const getBotServerUrl = () => {
 };
 
 const BOT_SERVER_URL = getBotServerUrl();
+console.log(`[Config] Bot Server URL set to: ${BOT_SERVER_URL}`);
 
 const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
 const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
