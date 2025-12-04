@@ -204,8 +204,8 @@ export const LiveDB = {
       try {
         console.log(`Attempting to send update to: ${BOT_SERVER_URL}`);
         
-        // Reduced retries for sending updates to fail faster on network errors
-        // so the user knows immediately if something is wrong.
+        // INCREASED RETRIES: Mobile networks can be flaky/slow uploading data.
+        // Bumped to 3 retries with 1500ms backoff to allow uploads to finish.
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -214,7 +214,7 @@ export const LiveDB = {
             message: logData.aiGeneratedMessage || '', 
             imageUrls: logData.imageUrls
           })
-        }, 2, 500); // 2 retries, 500ms backoff
+        }, 3, 1500); 
 
         if (response.ok) {
             finalStatus = 'SENT';
@@ -274,7 +274,7 @@ export const LiveDB = {
             message: log.aiGeneratedMessage || '',
             imageUrls: log.imageUrls
             })
-        }, 2, 500);
+        }, 3, 1500); // Also increased patience for retries
 
         if (!response.ok) {
             throw new Error("Retry failed. Bot rejected the request.");
@@ -345,7 +345,7 @@ export const LiveDB = {
     try {
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/groups`, {
             method: 'GET'
-        }, 2, 1000);
+        }, 3, 1500); // Increased patience for group scanning too
         
         if (!response.ok) {
             const errorText = await response.text();
@@ -364,7 +364,7 @@ export const LiveDB = {
 
   checkBotStatus: async (): Promise<BotStatusResponse> => {
     try {
-        const response = await fetchWithRetry(`${BOT_SERVER_URL}/status`, { method: 'GET' }, 2, 1000); 
+        const response = await fetchWithRetry(`${BOT_SERVER_URL}/status`, { method: 'GET' }, 3, 1000); 
         if (!response.ok) throw new Error(`Status check failed with ${response.status}`);
         return await response.json();
     } catch (e) {

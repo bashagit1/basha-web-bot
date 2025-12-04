@@ -66,9 +66,9 @@ const StaffDashboard: React.FC = () => {
         img.onload = () => {
             const canvas = document.createElement('canvas');
             
-            // Reduced to 800px: Perfect for WhatsApp, extremely fast upload
-            // Payload becomes ~50KB-80KB per image
-            const maxWidth = 800; 
+            // Reduced to 640px: Drastically smaller payload (~30KB) ensuring instant upload on weak WiFi
+            // Visual quality on WhatsApp remains excellent for phone screens.
+            const maxWidth = 640; 
             const scaleSize = maxWidth / img.width;
             const width = (img.width > maxWidth) ? maxWidth : img.width;
             const height = (img.width > maxWidth) ? img.height * scaleSize : img.height;
@@ -81,8 +81,8 @@ const StaffDashboard: React.FC = () => {
             // Clean up memory immediately
             URL.revokeObjectURL(objectUrl);
             
-            // JPEG at 0.35 quality is visually acceptable for WhatsApp but lightning fast
-            resolve(canvas.toDataURL('image/jpeg', 0.35));
+            // JPEG at 0.5 quality with 640px width is extremely light but clear
+            resolve(canvas.toDataURL('image/jpeg', 0.5));
         };
         
         img.onerror = () => {
@@ -175,7 +175,7 @@ const StaffDashboard: React.FC = () => {
         currentX += drawWidth;
     });
 
-    return canvas.toDataURL('image/jpeg', 0.35);
+    return canvas.toDataURL('image/jpeg', 0.5);
   };
 
   const handleSubmit = async () => {
