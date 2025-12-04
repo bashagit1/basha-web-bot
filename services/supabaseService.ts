@@ -5,26 +5,18 @@ import { BotStatusResponse } from './database';
 // CONFIGURATION
 
 // DYNAMIC URL DETECTION
-// This allows you to access the app from your phone on the same WiFi (e.g., http://192.168.1.5:5173)
-// and have it automatically talk to the bot server on your PC (http://192.168.1.5:3001).
+// This automatically switches between Localhost (Dev) and Railway (Prod)
 const getBotServerUrl = () => {
     const hostname = window.location.hostname;
-    const protocol = window.location.protocol;
-
-    // Check for Mixed Content Error (Netlify HTTPS -> Localhost HTTP)
-    if (protocol === 'https:' && !hostname.includes('localhost') && !hostname.includes('127.0.0.1')) {
-        console.error("CRITICAL: You are on HTTPS (Netlify) but trying to connect to a Local Bot Server.");
-        console.error("FIX: You must run the frontend LOCALLY (npm run dev) and access via http://localhost:5173 or http://YOUR_IP:5173");
+    
+    // 1. If running on Localhost or Local IP, look for local bot
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
+        return `http://${hostname}:3001`; // Port 3001 on the same machine
     }
     
-    // If running on localhost/127.0.0.1, assume bot is on localhost:3001
-    if (hostname === 'localhost' || hostname === '127.0.0.1') {
-        return 'http://localhost:3001';
-    }
-    
-    // If running on a local network IP (e.g., 192.168.x.x), assume bot is on the same IP port 3001
-    // This fixes the "Failed to fetch" error on mobile devices.
-    return `http://${hostname}:3001`;
+    // 2. If running on Netlify (Production), look for Railway
+    // REPLACE THIS WITH YOUR NEW RAILWAY URL AFTER DEPLOYING
+    return 'https://elderly-care-ai-production.up.railway.app';
 };
 
 const BOT_SERVER_URL = getBotServerUrl();

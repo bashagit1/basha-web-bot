@@ -38,7 +38,7 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Robust CORS to allow Localhost frontend
+// Robust CORS to allow Localhost frontend and Production frontend
 app.use(cors({
     origin: '*', 
     methods: ['GET', 'POST'],
@@ -52,8 +52,12 @@ app.use(express.urlencoded({ limit: '500mb', extended: true }));
 // --- IMMEDIATE SERVER START ---
 // CRITICAL FIX: Listen on '0.0.0.0' to allow connections from external devices (Phones) on the same WiFi.
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✅ AI Agent Server running locally on port ${PORT}`);
-    console.log(`   Accessible to network devices via your PC's IP address (e.g. 192.168.x.x:3001).`);
+    console.log(`✅ AI Agent Server running on port ${PORT}`);
+    if (process.env.RAILWAY_STATIC_URL) {
+        console.log(`   Public URL: https://${process.env.RAILWAY_STATIC_URL}`);
+    } else {
+        console.log(`   Accessible locally via IP (e.g. 192.168.x.x:3001).`);
+    }
 });
 
 // --- SUPABASE MAINTENANCE SETUP ---
@@ -162,9 +166,20 @@ setInterval(async () => {
 async function startWhatsApp() {
     console.log('Initializing WhatsApp Client...');
     
+    // DETERMINE STORAGE PATH
+    // If on Railway with a Volume, use /app/auth_data. Otherwise use default local folder.
+    // RAILWAY_VOLUME_MOUNT_PATH should be set to /app/auth_data in Railway Dashboard.
+    const authPath = process.env.RAILWAY_VOLUME_MOUNT_PATH 
+        ? process.env.RAILWAY_VOLUME_MOUNT_PATH 
+        : './.wwebjs_auth';
+
+    console.log(`Using Auth Path: ${authPath}`);
+
     try {
         client = new Client({
-            authStrategy: new LocalAuth(), // LocalAuth saves session to ./wwebjs_auth
+            authStrategy: new LocalAuth({
+                dataPath: authPath
+            }), 
             puppeteer: {
                 args: [
                     '--no-sandbox', 
@@ -182,6 +197,7 @@ async function startWhatsApp() {
                     '--metrics-recording-only'
                 ],
                 headless: true,
+                // Spoof User Agent to look like Real Chrome
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             }
         });
@@ -315,7 +331,7 @@ async function processJob(job) {
 
 app.get('/', (req, res) => {
     const uptime = process.uptime();
-    res.send(`Elderly Care Watch AI Bot Server is Running Locally! Uptime: ${Math.floor(uptime)}s | Queue: ${jobQueue.length}`);
+    res.send(`Elderly Care Watch AI Bot Server is Running! Uptime: ${Math.floor(uptime)}s | Queue: ${jobQueue.length}`);
 });
 
 app.get('/status', (req, res) => {
@@ -362,7 +378,9 @@ app.get('/groups', async (req, res) => {
 });
 
 app.post('/send-update', (req, res) => {
+    // If not ready, we still queue it if basic server is up, or return error
     if (!isReady) {
+        // Soft fail: returning 503 triggers retry in frontend
         return res.status(503).json({ error: 'WhatsApp not connected' });
     }
 
