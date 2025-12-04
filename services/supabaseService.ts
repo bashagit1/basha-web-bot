@@ -205,7 +205,7 @@ export const LiveDB = {
         console.log(`Attempting to send update to: ${BOT_SERVER_URL}`);
         
         // INCREASED RETRIES: Mobile networks can be flaky/slow uploading data.
-        // Bumped to 3 retries with 1500ms backoff to allow uploads to finish.
+        // Bumped to 5 retries with 2000ms backoff to allow uploads to finish.
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -214,7 +214,7 @@ export const LiveDB = {
             message: logData.aiGeneratedMessage || '', 
             imageUrls: logData.imageUrls
           })
-        }, 3, 1500); 
+        }, 5, 2000); 
 
         if (response.ok) {
             finalStatus = 'SENT';
@@ -274,7 +274,7 @@ export const LiveDB = {
             message: log.aiGeneratedMessage || '',
             imageUrls: log.imageUrls
             })
-        }, 3, 1500); // Also increased patience for retries
+        }, 5, 2000); // Also increased patience for retries
 
         if (!response.ok) {
             throw new Error("Retry failed. Bot rejected the request.");

@@ -50,9 +50,10 @@ app.use(express.json({ limit: '500mb' }));
 app.use(express.urlencoded({ limit: '500mb', extended: true }));
 
 // --- IMMEDIATE SERVER START ---
-app.listen(PORT, () => {
+// CRITICAL FIX: Listen on '0.0.0.0' to allow connections from external devices (Phones) on the same WiFi.
+app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ AI Agent Server running locally on port ${PORT}`);
-    console.log(`   Frontend should be running via 'npm run dev' to connect.`);
+    console.log(`   Accessible to network devices via your PC's IP address.`);
 });
 
 // --- SUPABASE MAINTENANCE SETUP ---
