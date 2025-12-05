@@ -6,7 +6,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "start:bot": "node --expose-gc server/bot.js"
+    "start:bot": "node --expose-gc server/bot.js",
+    "start:tunnel": "ngrok http --domain=cyclic-zena-viscous.ngrok-free.dev 3001"
   },
   "dependencies": {
     "react": "^18.3.1",

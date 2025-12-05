@@ -5,35 +5,40 @@ import { BotStatusResponse } from './database';
 // CONFIGURATION
 
 // DYNAMIC URL DETECTION
-// 1. Check for manual override (Ngrok/Tunnel)
-// 2. Check for Localhost
-// 3. Default to Railway/Prod
 const getBotServerUrl = () => {
-    // Allows user to paste Ngrok URL in .env to fix mobile issues
+    // 1. Check for manual override from Netlify Environment Variable
     const overrideUrl = (import.meta as any).env?.VITE_BOT_OVERRIDE_URL;
     if (overrideUrl) {
+        console.log(`[Config] Using Override URL: ${overrideUrl}`);
         return overrideUrl;
+    }
+
+    // 2. Hardcoded Static Domain (User Provided)
+    // If running on Netlify (Production) and no override is set, use this specific tunnel.
+    if (window.location.hostname.includes('netlify.app')) {
+        console.log('[Config] Detected Netlify. Using Static Ngrok Tunnel.');
+        return 'https://cyclic-zena-viscous.ngrok-free.dev';
     }
 
     const hostname = window.location.hostname;
     
-    // If running on Localhost or Local IP, look for local bot
+    // 3. If running on Localhost or Local IP, look for local bot
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
         return `http://${hostname}:3001`; // Port 3001 on the same machine
     }
     
-    // Default Fallback
-    return 'https://elderly-care-ai-production.up.railway.app';
+    // 4. Default Fallback
+    return 'http://localhost:3001';
 };
 
 const BOT_SERVER_URL = getBotServerUrl();
 console.log(`[Config] Bot Server URL set to: ${BOT_SERVER_URL}`);
 
-// WARN USER IF USING NETLIFY TO ACCESS LOCALHOST
+// WARN USER IF USING NETLIFY WITHOUT OVERRIDE
 if (window.location.hostname.includes('netlify.app') && BOT_SERVER_URL.includes('localhost')) {
-    console.error("CRITICAL CONFIG ERROR: You are trying to access a Localhost Server from a Netlify (HTTPS) Website.");
-    console.error("This will fail due to Mixed Content Security.");
-    console.error("FIX: Either run the frontend locally (npm run dev) OR use Ngrok to tunnel your server.");
+    console.error("CRITICAL CONFIG ERROR: You are on Netlify but the Bot URL is Localhost.");
+    console.error("The app cannot connect to your PC.");
+    console.error("FIX: Add 'VITE_BOT_OVERRIDE_URL' to Netlify Environment Variables with your Ngrok URL.");
 }
 
 const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
