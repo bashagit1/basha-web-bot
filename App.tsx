@@ -157,6 +157,8 @@ const LoginSelection: React.FC<{ onSelect: (role: UserRole) => void; toggleTheme
                     <div className="relative">
                         <input 
                             type="password" 
+                            inputMode="numeric" // Optimize for mobile numeric keypad
+                            pattern="[0-9]*"    // Fallback for iOS
                             value={pin}
                             onChange={(e) => {
                                 setPin(e.target.value);
@@ -166,7 +168,7 @@ const LoginSelection: React.FC<{ onSelect: (role: UserRole) => void; toggleTheme
                                 error ? 'border-red-300 text-red-500' : 'border-slate-200 dark:border-slate-600 text-slate-800 dark:text-white focus:border-brand-500'
                             }`}
                             placeholder="••••"
-                            maxLength={4}
+                            maxLength={8} // Increased max length
                             autoFocus
                         />
                     </div>
@@ -196,7 +198,7 @@ const LoginSelection: React.FC<{ onSelect: (role: UserRole) => void; toggleTheme
             )}
             
             <div className="mt-8 pt-6 border-t border-slate-100 dark:border-slate-800 flex justify-between items-center text-xs text-slate-400 dark:text-slate-500 font-medium">
-               <span>v1.0.2 Stable</span>
+               <span>v1.0.3 Stable</span>
                <div className="flex items-center space-x-1">
                  <Sparkles className="w-3 h-3" />
                  <span>Powered by Gemini AI</span>
@@ -209,7 +211,11 @@ const LoginSelection: React.FC<{ onSelect: (role: UserRole) => void; toggleTheme
 };
 
 const App: React.FC = () => {
-  const [userRole, setUserRole] = useState<UserRole | null>(null);
+  // Initialize from localStorage to persist session
+  const [userRole, setUserRole] = useState<UserRole | null>(() => {
+      const storedRole = localStorage.getItem('carewatch_user_role');
+      return storedRole ? (storedRole as UserRole) : null;
+  });
   
   // Theme state
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -235,8 +241,14 @@ const App: React.FC = () => {
 
   const toggleTheme = () => setIsDarkMode(!isDarkMode);
 
+  const handleLogin = (role: UserRole) => {
+      setUserRole(role);
+      localStorage.setItem('carewatch_user_role', role);
+  };
+
   const handleLogout = () => {
     setUserRole(null);
+    localStorage.removeItem('carewatch_user_role');
   };
 
   return (
@@ -246,7 +258,7 @@ const App: React.FC = () => {
           path="/" 
           element={
             !userRole ? (
-              <LoginSelection onSelect={setUserRole} toggleTheme={toggleTheme} isDarkMode={isDarkMode} />
+              <LoginSelection onSelect={handleLogin} toggleTheme={toggleTheme} isDarkMode={isDarkMode} />
             ) : (
               <Navigate to={userRole === UserRole.ADMIN ? "/admin" : "/staff"} replace />
             )
