@@ -121,7 +121,7 @@ const StaffDashboard: React.FC = () => {
     }
   };
 
-  // --- COLLAGE ENGINE ---
+  // --- COLLAGE ENGINE (UPDATED 1:1 GRID) ---
   const generateCollage = async (imageUrls: string[]): Promise<string> => {
     if (imageUrls.length <= 1) return imageUrls[0];
 
@@ -135,48 +135,72 @@ const StaffDashboard: React.FC = () => {
       }))
     );
 
-    // Target height for normalization
-    const targetHeight = 800; 
-    let totalWidth = 0;
-
-    // Calculate total width needed
-    loadedImages.forEach(img => {
-      const aspectRatio = img.width / img.height;
-      totalWidth += targetHeight * aspectRatio;
-    });
-
+    // Create a fixed 1:1 Square Canvas (1200x1200)
+    // This ensures the image looks "Big" in WhatsApp preview
+    const size = 1200;
     const canvas = document.createElement('canvas');
-    canvas.width = totalWidth;
-    canvas.height = targetHeight;
+    canvas.width = size;
+    canvas.height = size;
     const ctx = canvas.getContext('2d');
 
     if (!ctx) throw new Error("Canvas context failed");
 
     // Fill white background
-    ctx.fillStyle = 'white';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, size, size);
 
-    let currentX = 0;
-    loadedImages.forEach((img, index) => {
-        const aspectRatio = img.width / img.height;
-        const drawWidth = targetHeight * aspectRatio;
+    const count = loadedImages.length;
+    const gap = 8; // white gap size
+
+    // Helper: Draw image nicely filling the rect (Object-Fit: Cover)
+    const drawImg = (img: HTMLImageElement, x: number, y: number, w: number, h: number) => {
+        const imgRatio = img.width / img.height;
+        const targetRatio = w / h;
+        let sx, sy, sWidth, sHeight;
         
-        ctx.drawImage(img, currentX, 0, drawWidth, targetHeight);
-        
-        // Add a white separator line between images
-        if (index > 0) {
-            ctx.beginPath();
-            ctx.moveTo(currentX, 0);
-            ctx.lineTo(currentX, targetHeight);
-            ctx.lineWidth = 8;
-            ctx.strokeStyle = 'white';
-            ctx.stroke();
+        if (targetRatio > imgRatio) { 
+            // Target is wider than source -> Crop top/bottom
+            sWidth = img.width;
+            sHeight = img.width / targetRatio;
+            sx = 0;
+            sy = (img.height - sHeight) / 2;
+        } else { 
+            // Target is taller than source -> Crop sides
+            sHeight = img.height;
+            sWidth = img.height * targetRatio;
+            sy = 0;
+            sx = (img.width - sWidth) / 2;
         }
+        ctx.drawImage(img, sx, sy, sWidth, sHeight, x, y, w, h);
+    };
 
-        currentX += drawWidth;
-    });
+    if (count === 2) {
+        // 2 Images: Split Vertically (Top and Bottom)
+        // Keeps them wide and large
+        const h = (size - gap) / 2;
+        drawImg(loadedImages[0], 0, 0, size, h);
+        drawImg(loadedImages[1], 0, h + gap, size, h);
+    } else if (count === 3) {
+        // 3 Images: 2 on Top, 1 on Bottom
+        const half = (size - gap) / 2;
+        
+        // Top Left
+        drawImg(loadedImages[0], 0, 0, half, half);
+        // Top Right
+        drawImg(loadedImages[1], half + gap, 0, half, half);
+        // Bottom Full
+        drawImg(loadedImages[2], 0, half + gap, size, half);
+    } else {
+        // 4+ Images: 2x2 Grid (for future proofing)
+        const half = (size - gap) / 2;
+        drawImg(loadedImages[0], 0, 0, half, half);
+        drawImg(loadedImages[1], half + gap, 0, half, half);
+        drawImg(loadedImages[2], 0, half + gap, half, half);
+        drawImg(loadedImages[3], half + gap, half + gap, half, half);
+    }
 
-    return canvas.toDataURL('image/jpeg', 0.5);
+    // High quality export
+    return canvas.toDataURL('image/jpeg', 0.9);
   };
 
   const handleSubmit = async () => {
