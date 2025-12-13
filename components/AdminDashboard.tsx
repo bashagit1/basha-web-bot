@@ -31,7 +31,9 @@ import {
   Trash2,
   AlertCircle,
   Camera,
-  Pencil
+  Pencil,
+  Globe,
+  Save
 } from 'lucide-react';
 
 const AdminDashboard: React.FC = () => {
@@ -58,6 +60,10 @@ const AdminDashboard: React.FC = () => {
   const [isScanningGroups, setIsScanningGroups] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
   
+  // Custom URL State
+  const [customUrl, setCustomUrl] = useState('');
+  const [isSavingUrl, setIsSavingUrl] = useState(false);
+
   // Gallery State
   const [selectedImage, setSelectedImage] = useState<any | null>(null);
   const [galleryFilterResident, setGalleryFilterResident] = useState<string>('all');
@@ -80,6 +86,10 @@ const AdminDashboard: React.FC = () => {
     // Force a fresh scan of groups on mount to ensure the dropdown is populated
     handleScanGroups(true); 
     startBotPolling();
+    // Load custom url if exists
+    const stored = localStorage.getItem('custom_bot_url');
+    if (stored) setCustomUrl(stored);
+
     return () => stopBotPolling();
   }, [activeTab]);
 
@@ -216,6 +226,25 @@ const AdminDashboard: React.FC = () => {
     } finally {
       if (!silent) setIsScanningGroups(false);
     }
+  };
+
+  const handleSaveCustomUrl = () => {
+    setIsSavingUrl(true);
+    // basic cleanup
+    let url = customUrl.trim();
+    if (url.endsWith('/')) url = url.slice(0, -1);
+    
+    if (url === '') {
+        localStorage.removeItem('custom_bot_url');
+    } else {
+        localStorage.setItem('custom_bot_url', url);
+    }
+    
+    // Slight delay to show feedback then reload
+    setTimeout(() => {
+        setIsSavingUrl(false);
+        window.location.reload();
+    }, 500);
   };
 
   const copyToClipboard = (text: string) => {
@@ -507,18 +536,48 @@ const AdminDashboard: React.FC = () => {
             )}
 
             {botStatus === 'offline' && (
-            <div className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 p-6 rounded-2xl flex items-start space-x-4">
-                <div className="p-2 bg-red-100 dark:bg-red-900/40 rounded-lg">
-                    <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+            <div className="space-y-6">
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/50 p-6 rounded-2xl flex items-start space-x-4">
+                    <div className="p-2 bg-red-100 dark:bg-red-900/40 rounded-lg">
+                        <AlertTriangle className="w-6 h-6 text-red-600 dark:text-red-400" />
+                    </div>
+                    <div>
+                        <h4 className="font-bold text-red-900 dark:text-red-200">How to fix this</h4>
+                        <ul className="list-disc list-inside text-sm text-red-700 dark:text-red-300 mt-2 space-y-1">
+                            <li>Open your computer terminal</li>
+                            <li>Navigate to the project folder</li>
+                            <li>Run <code className="bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-red-200 dark:border-red-800 font-mono text-xs">npm install</code> (only once)</li>
+                            <li>Run <code className="bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-red-200 dark:border-red-800 font-mono text-xs">node server/bot.js</code></li>
+                        </ul>
+                    </div>
                 </div>
-                <div>
-                    <h4 className="font-bold text-red-900 dark:text-red-200">How to fix this</h4>
-                    <ul className="list-disc list-inside text-sm text-red-700 dark:text-red-300 mt-2 space-y-1">
-                        <li>Open your computer terminal</li>
-                        <li>Navigate to the project folder</li>
-                        <li>Run <code className="bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-red-200 dark:border-red-800 font-mono text-xs">npm install</code> (only once)</li>
-                        <li>Run <code className="bg-white dark:bg-slate-900 px-2 py-0.5 rounded border border-red-200 dark:border-red-800 font-mono text-xs">node server/bot.js</code></li>
-                    </ul>
+
+                {/* NEW: Remote Connection Settings */}
+                <div className="bg-blue-50 dark:bg-slate-700/50 border border-blue-100 dark:border-slate-600 p-6 rounded-2xl">
+                    <div className="flex items-center space-x-2 mb-3">
+                        <Globe className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                        <h4 className="font-bold text-slate-800 dark:text-white">Remote Connection (Mobile Use)</h4>
+                    </div>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                        Using the app from outside? Run <code className="font-mono bg-white dark:bg-slate-800 px-1 rounded">ngrok http 3001</code> on your PC and paste the URL here.
+                    </p>
+                    <div className="flex gap-3">
+                        <input 
+                            type="text" 
+                            placeholder="e.g. https://xxxx-xxxx.ngrok-free.app"
+                            className="flex-1 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 text-slate-800 dark:text-white focus:ring-2 focus:ring-blue-500 outline-none"
+                            value={customUrl}
+                            onChange={(e) => setCustomUrl(e.target.value)}
+                        />
+                        <button 
+                            onClick={handleSaveCustomUrl}
+                            disabled={isSavingUrl}
+                            className="px-6 py-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                        >
+                            {isSavingUrl ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                            <span>Save</span>
+                        </button>
+                    </div>
                 </div>
             </div>
             )}

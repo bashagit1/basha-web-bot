@@ -6,14 +6,22 @@ import { BotStatusResponse } from './database';
 
 // DYNAMIC URL DETECTION
 const getBotServerUrl = () => {
-    // 1. Check for manual override from Netlify Environment Variable
+    // 1. LocalStorage Override (Dynamic Access for Mobile)
+    // This allows the user to paste a new Ngrok URL in the UI without redeploying
+    const localOverride = localStorage.getItem('custom_bot_url');
+    if (localOverride) {
+        console.log(`[Config] Using Local Storage URL: ${localOverride}`);
+        return localOverride;
+    }
+
+    // 2. Check for manual override from Netlify Environment Variable
     const overrideUrl = (import.meta as any).env?.VITE_BOT_OVERRIDE_URL;
     if (overrideUrl) {
         console.log(`[Config] Using Override URL: ${overrideUrl}`);
         return overrideUrl;
     }
 
-    // 2. Hardcoded Static Domain (User Provided)
+    // 3. Hardcoded Static Domain (User Provided)
     // If running on Netlify (Production) and no override is set, use this specific tunnel.
     if (window.location.hostname.includes('netlify.app')) {
         console.log('[Config] Detected Netlify. Using Static Ngrok Tunnel.');
@@ -22,12 +30,12 @@ const getBotServerUrl = () => {
 
     const hostname = window.location.hostname;
     
-    // 3. If running on Localhost or Local IP, look for local bot
+    // 4. If running on Localhost or Local IP, look for local bot
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
         return `http://${hostname}:3001`; // Port 3001 on the same machine
     }
     
-    // 4. Default Fallback
+    // 5. Default Fallback
     return 'http://localhost:3001';
 };
 
@@ -35,10 +43,9 @@ const BOT_SERVER_URL = getBotServerUrl();
 console.log(`[Config] Bot Server URL set to: ${BOT_SERVER_URL}`);
 
 // WARN USER IF USING NETLIFY WITHOUT OVERRIDE
-if (window.location.hostname.includes('netlify.app') && BOT_SERVER_URL.includes('localhost')) {
-    console.error("CRITICAL CONFIG ERROR: You are on Netlify but the Bot URL is Localhost.");
-    console.error("The app cannot connect to your PC.");
-    console.error("FIX: Add 'VITE_BOT_OVERRIDE_URL' to Netlify Environment Variables with your Ngrok URL.");
+if (window.location.hostname.includes('netlify.app') && BOT_SERVER_URL.includes('localhost') && !localStorage.getItem('custom_bot_url')) {
+    console.warn("NOTICE: You are on Netlify but the Bot URL is Localhost.");
+    console.warn("If you are on mobile, go to Admin > WhatsApp Bot and paste your Ngrok URL.");
 }
 
 const SUPABASE_URL = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
