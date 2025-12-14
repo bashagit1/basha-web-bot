@@ -179,7 +179,9 @@ async function startWhatsApp() {
                     '--disable-web-security',
                     '--enable-features=NetworkService',
                     '--allow-running-insecure-content',
-                    '--disable-ipc-flooding-protection'
+                    '--disable-ipc-flooding-protection',
+                    // Additional stability flags for media evaluation
+                    '--disable-features=IsolateOrigins,site-per-process' 
                 ],
                 headless: true,
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
@@ -287,10 +289,8 @@ async function processJob(job) {
                     let mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
                     const data = parts[1];
 
-                    // --- CRITICAL FIX: TRUST THE MIME TYPE ---
-                    // Do not masquerade video/webm as video/mp4, as it corrupts the upload.
-                    // Instead, calculate the extension based on the real mime.
-                    
+                    // --- MIME HANDLING ---
+                    // Detect file extension from MIME type
                     let ext = 'bin';
                     if (mime.includes('jpeg') || mime.includes('jpg')) ext = 'jpg';
                     else if (mime.includes('png')) ext = 'png';
@@ -317,10 +317,7 @@ async function processJob(job) {
                     const isVideo = media.mimetype.includes('video');
                     
                     if (isVideo) {
-                        // FORCE VIDEO PLAYER
-                        // If the mime is valid (mp4/3gpp), WhatsApp will play it.
-                        // If the mime is 'webm', WhatsApp might treat it as a file regardless of this flag,
-                        // but setting it to false is the correct way to ASK for a video player.
+                        // FORCE VIDEO PLAYER PREFERENCE
                         options.sendMediaAsDocument = false; 
                     }
 
@@ -328,7 +325,7 @@ async function processJob(job) {
                     
                     const timeoutSeconds = isVideo ? 300000 : 30000; // 5 Minutes for Video
                     
-                    // --- RETRY LOOP ---
+                    // --- SMART RETRY LOOP ---
                     let sent = false;
                     let lastError = null;
 
@@ -346,11 +343,22 @@ async function processJob(job) {
                             break; 
                         } catch (attemptError) {
                             console.warn(`[QUEUE] ⚠️ Attempt ${attempt} failed: ${attemptError.message}`);
+                            
+                            // --- SMART FALLBACK ---
+                            // If sending as Video failed (Evaluation failed), it usually means the headless browser
+                            // lacks the codec to generate the video thumbnail. 
+                            // We SWITCH to sending as a DOCUMENT which bypasses thumbnail generation.
+                            if (isVideo && !options.sendMediaAsDocument) {
+                                console.log('[QUEUE] 🔄 Switched to Document Mode (Fallback) to ensure delivery.');
+                                options.sendMediaAsDocument = true;
+                                // Reset attempt counter to give document mode a fair chance? 
+                                // No, keep loop, but next retry will use document mode.
+                            }
+
                             lastError = attemptError;
                             
                             if (attempt < 3) {
-                                const waitTime = attempt * 5000;
-                                console.log(`[QUEUE] Retrying in ${waitTime/1000}s...`);
+                                const waitTime = attempt * 3000; // 3s, 6s
                                 await new Promise(r => setTimeout(r, waitTime));
                             }
                         }
