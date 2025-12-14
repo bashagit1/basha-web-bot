@@ -168,7 +168,6 @@ async function startWhatsApp() {
                     '--no-zygote',
                     '--single-process', 
                     '--disable-gpu',
-                    // CRITICAL FIX: Increase shared memory for Video Processing
                     '--shm-size=1gb', 
                     '--disable-extensions',
                     '--mute-audio',
@@ -179,10 +178,10 @@ async function startWhatsApp() {
                     '--metrics-recording-only',
                     '--disable-web-security',
                     '--enable-features=NetworkService',
-                    '--allow-running-insecure-content'
+                    '--allow-running-insecure-content',
+                    '--disable-ipc-flooding-protection'
                 ],
                 headless: true,
-                // CRITICAL FIX: Use latest Chrome User Agent to avoid WhatsApp blocking media
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
             }
         });
@@ -285,21 +284,21 @@ async function processJob(job) {
                 if (url.startsWith('data:')) {
                     const parts = url.split(',');
                     const mimeMatch = parts[0].match(/:(.*?);/);
-                    let mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+                    let mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
                     const data = parts[1];
 
-                    // --- VIDEO FIX ---
-                    // WhatsApp Web requires 'video/mp4' to display the inline player.
-                    // Even if the source is 'video/webm' (Android), we try masquerading it.
-                    let ext = 'jpg';
-                    if (mime.startsWith('video/')) {
-                        mime = 'video/mp4'; 
-                        ext = 'mp4';
-                    } else {
-                         if (mime.includes('png')) ext = 'png';
-                         else if (mime.includes('webp')) ext = 'webp';
-                         else ext = 'jpg';
-                    }
+                    // --- CRITICAL FIX: TRUST THE MIME TYPE ---
+                    // Do not masquerade video/webm as video/mp4, as it corrupts the upload.
+                    // Instead, calculate the extension based on the real mime.
+                    
+                    let ext = 'bin';
+                    if (mime.includes('jpeg') || mime.includes('jpg')) ext = 'jpg';
+                    else if (mime.includes('png')) ext = 'png';
+                    else if (mime.includes('webp')) ext = 'webp';
+                    else if (mime.includes('mp4')) ext = 'mp4';
+                    else if (mime.includes('webm')) ext = 'webm';
+                    else if (mime.includes('quicktime')) ext = 'mov';
+                    else if (mime.includes('pdf')) ext = 'pdf';
                     
                     const filename = `update_${Date.now()}_${i}.${ext}`;
                     media = new MessageMedia(mime, data, filename);
@@ -318,14 +317,16 @@ async function processJob(job) {
                     const isVideo = media.mimetype.includes('video');
                     
                     if (isVideo) {
-                        // STRICT FORCE: Prevent "Document" behavior
+                        // FORCE VIDEO PLAYER
+                        // If the mime is valid (mp4/3gpp), WhatsApp will play it.
+                        // If the mime is 'webm', WhatsApp might treat it as a file regardless of this flag,
+                        // but setting it to false is the correct way to ASK for a video player.
                         options.sendMediaAsDocument = false; 
                     }
 
                     console.log(`[QUEUE] Sending media to ${groupId}...`);
                     
-                    // Increased timeout for video processing
-                    const timeoutSeconds = isVideo ? 120000 : 30000;
+                    const timeoutSeconds = isVideo ? 300000 : 30000; // 5 Minutes for Video
                     
                     // --- RETRY LOOP ---
                     let sent = false;
@@ -333,7 +334,6 @@ async function processJob(job) {
 
                     for (let attempt = 1; attempt <= 3; attempt++) {
                         try {
-                            // Race condition wrapper to catch timeouts explicitly
                             const sendPromise = client.sendMessage(groupId, media, options);
                             const timeoutPromise = new Promise((_, reject) => 
                                 setTimeout(() => reject(new Error('Timeout sending media')), timeoutSeconds)
@@ -348,7 +348,6 @@ async function processJob(job) {
                             console.warn(`[QUEUE] ⚠️ Attempt ${attempt} failed: ${attemptError.message}`);
                             lastError = attemptError;
                             
-                            // Exponential Backoff: Wait 5s, then 10s
                             if (attempt < 3) {
                                 const waitTime = attempt * 5000;
                                 console.log(`[QUEUE] Retrying in ${waitTime/1000}s...`);
