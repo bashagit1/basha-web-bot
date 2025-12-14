@@ -50,7 +50,6 @@ app.use(express.json({ limit: '1gb' }));
 app.use(express.urlencoded({ limit: '1gb', extended: true }));
 
 // --- IMMEDIATE SERVER START ---
-// CRITICAL FIX: Listen on '0.0.0.0' to allow connections from external devices (Phones) on the same WiFi.
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`✅ AI Agent Server running on port ${PORT}`);
     console.log(`   - Local:   http://localhost:${PORT}`);
@@ -59,14 +58,12 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`   Run: ngrok http ${PORT}`);
 });
 
-// --- SUPABASE MAINTENANCE SETUP ---
+// --- SUPABASE SETUP ---
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zaiektkvhjfndfebolao.supabase.co';
 const SUPABASE_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphaWVrdGt2aGpmbmRmZWJvbGFvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM3OTM3NTEsImV4cCI6MjA3OTM2OTc1MX0.34BB18goOvIpwPci2u25JLoC7l9PRfanpC9C4DS4RfQ';
 
 if (!process.env.SUPABASE_URL && !process.env.SUPABASE_ANON_KEY) {
     console.warn("\n⚠️  WARNING: SUPABASE KEYS MISSING IN .env FILE");
-    console.warn("   Auto-cleanup of old images will not work.");
-    console.warn("   Please create a .env file with SUPABASE_URL and SUPABASE_ANON_KEY.\n");
 }
 
 let supabase = null;
@@ -86,30 +83,16 @@ let isProcessingQueue = false;
 let lastJobStartTime = 0; // Timestamp to track stuck jobs
 
 // --- SCHEDULED MAINTENANCE ---
-
-// 1. Database Image Cleanup (Every 1 Hour) - General
+// 1. Database Image Cleanup (Every 1 Hour)
 setInterval(async () => {
     if (!supabase) return;
-
-    if (global.gc) {
-        console.log('[MAINTENANCE] Running Garbage Collection...');
-        global.gc();
-    }
+    if (global.gc) global.gc();
 
     console.log('[MAINTENANCE] Running 15-Hour Image Cleanup...');
     const timeLimit = new Date(Date.now() - 15 * 60 * 60 * 1000).toISOString();
 
     try {
-        const { error } = await supabase
-            .from('activity_logs')
-            .update({ image_urls: [] })
-            .lt('created_at', timeLimit);
-        
-        if (error) {
-            console.error('[CLEANUP] Error:', error.message);
-        } else {
-            console.log('[CLEANUP] Old images removed to save database space.');
-        }
+        await supabase.from('activity_logs').update({ image_urls: [] }).lt('created_at', timeLimit);
     } catch (err) {
         console.error('[CLEANUP] Failed:', err.message);
     }
@@ -118,41 +101,30 @@ setInterval(async () => {
 // 2. VIDEO QUICK CLEANUP (Every 1 Minute)
 setInterval(async () => {
     if (!supabase) return;
-    
     // 5 minutes ago
     const timeLimit = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-
     try {
-        const { error } = await supabase
+        await supabase
             .from('activity_logs')
             .update({ image_urls: [] }) 
             .eq('category', 'Video Message')
             .lt('created_at', timeLimit)
             .neq('image_urls', '{}'); 
-            
-        if (error) {
-            // suppress common errors
-        }
     } catch (err) {
-        console.error('[VIDEO CLEANUP] Failed:', err.message);
+        // suppress
     }
 }, 60 * 1000); 
-
 
 // 3. Keep-Alive Ping (Every 4 Hours)
 setInterval(async () => {
     if (isReady && client) {
         console.log('[MAINTENANCE] Sending Keep-Alive Ping...');
-        try {
-            await client.getState(); 
-        } catch (e) {
-            console.warn('[MAINTENANCE] Keep-Alive failed:', e.message);
-        }
+        try { await client.getState(); } catch (e) {}
     }
 }, 4 * 60 * 60 * 1000);
 
 
-// --- HEARTBEAT & SELF-HEALING (WATCHDOG) ---
+// --- HEARTBEAT & SELF-HEALING ---
 setInterval(async () => {
     const memUsage = process.memoryUsage();
     const ram = Math.round(memUsage.heapUsed / 1024 / 1024);
@@ -163,22 +135,10 @@ setInterval(async () => {
     // WATCHDOG: Check for STUCK JOBS
     if (isProcessingQueue && lastJobStartTime > 0) {
         const duration = Date.now() - lastJobStartTime;
-        if (duration > 300000) { // 5 minutes (Increased for Video)
+        if (duration > 360000) { // 6 minutes
             console.error(`[WATCHDOG] 🚨 CRITICAL: Job stuck for ${Math.round(duration/1000)}s.`);
             console.error('[WATCHDOG] Force restarting server...');
             process.exit(1); 
-        }
-    }
-
-    // Active Health Check
-    if (isReady && client) {
-        try {
-            const statePromise = client.getState();
-            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 10000));
-            await Promise.race([statePromise, timeoutPromise]);
-        } catch (e) {
-            console.error('[HEARTBEAT] Client unresponsive/timeout. Force Restarting...', e.message);
-            process.exit(1);
         }
     }
 }, 60000); 
@@ -198,11 +158,7 @@ async function startWhatsApp() {
             authStrategy: new LocalAuth({
                 dataPath: authPath
             }), 
-            // Lock the web version to a stable release to prevent media upload issues
-            webVersionCache: {
-                type: 'remote',
-                remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
-            },
+            // NOTE: Removed webVersionCache to allow auto-detection of latest stable version
             puppeteer: {
                 args: [
                     '--no-sandbox', 
@@ -211,10 +167,11 @@ async function startWhatsApp() {
                     '--disable-accelerated-2d-canvas',
                     '--no-first-run',
                     '--no-zygote',
+                    '--single-process', 
                     '--disable-gpu',
                     '--disable-extensions',
                     '--mute-audio',
-                    '--disable-software-rasterizer', // Helps with video processing stability
+                    '--disable-software-rasterizer',
                     '--no-default-browser-check',
                     '--disable-features=Translate',
                     '--force-color-profile=srgb',
@@ -224,7 +181,6 @@ async function startWhatsApp() {
                     '--allow-running-insecure-content'
                 ],
                 headless: true,
-                // Masquerade as a real modern Chrome to avoid being flagged by WhatsApp
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             }
         });
@@ -297,7 +253,6 @@ async function processQueue() {
         console.error(`[QUEUE] Job Failed:`, err);
         
         // --- ERROR FEEDBACK LOOP ---
-        // If the job fails (e.g. video upload timeout), report back to Supabase
         if (job.logId && supabase) {
              console.log(`[QUEUE] Reporting failure back to DB for log ${job.logId}...`);
              supabase.from('activity_logs').update({ status: 'FAILED' }).eq('id', job.logId)
@@ -367,17 +322,38 @@ async function processJob(job) {
 
                     console.log(`[QUEUE] Sending media to ${groupId}...`);
                     
-                    // Increased timeout to 5 minutes for large video processing
                     const timeoutSeconds = isVideo ? 300000 : 30000;
-                    const timeoutPromise = new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Timeout sending media')), timeoutSeconds)
-                    );
+                    
+                    // --- RETRY LOOP ---
+                    // Try to send up to 3 times to handle network flakiness
+                    let sent = false;
+                    let lastError = null;
 
-                    // ATTEMPT: Normal Send (Video Player)
-                    // We removed the catch/fallback block. If this fails, it fails, but it won't send as a doc.
-                    const sendPromise = client.sendMessage(groupId, media, options);
-                    await Promise.race([sendPromise, timeoutPromise]);
-                    console.log(`[QUEUE] ✅ Sent media ${i + 1}/${imageUrls.length}`);
+                    for (let attempt = 1; attempt <= 3; attempt++) {
+                        try {
+                            const timeoutPromise = new Promise((_, reject) => 
+                                setTimeout(() => reject(new Error('Timeout sending media')), timeoutSeconds)
+                            );
+                            const sendPromise = client.sendMessage(groupId, media, options);
+                            
+                            await Promise.race([sendPromise, timeoutPromise]);
+                            
+                            sent = true;
+                            console.log(`[QUEUE] ✅ Sent media ${i + 1}/${imageUrls.length} (Attempt ${attempt})`);
+                            break; // Success, exit retry loop
+                        } catch (attemptError) {
+                            console.warn(`[QUEUE] ⚠️ Attempt ${attempt} failed: ${attemptError.message}`);
+                            lastError = attemptError;
+                            if (attempt < 3) {
+                                console.log('[QUEUE] Retrying in 5s...');
+                                await new Promise(r => setTimeout(r, 5000));
+                            }
+                        }
+                    }
+
+                    if (!sent) {
+                        throw lastError || new Error("Failed to send media after 3 attempts");
+                    }
                 }
             } catch (imgErr) {
                 console.error(`[QUEUE] ❌ Error sending media ${i+1}:`, imgErr.message);
@@ -402,8 +378,6 @@ async function processJob(job) {
 
 
 // --- API ENDPOINTS ---
-
-// PING Endpoint for testing Ngrok
 app.get('/ping', (req, res) => {
     res.send('pong');
 });
@@ -428,27 +402,15 @@ app.get('/groups', async (req, res) => {
     if (!isReady || !client) {
         return res.json([]); 
     }
-    
     try {
-        let attempts = 0;
         let groups = [];
-        
-        while (attempts < 3 && groups.length === 0) {
-            const chats = await client.getChats();
-            groups = chats
-                .filter(chat => chat.isGroup || chat.id._serialized.endsWith('@g.us'))
-                .map(chat => ({
-                    id: chat.id._serialized,
-                    name: chat.name || 'Unknown Group'
-                }));
-
-            if (groups.length === 0) {
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                attempts++;
-            } else {
-                break;
-            }
-        }
+        const chats = await client.getChats();
+        groups = chats
+            .filter(chat => chat.isGroup || chat.id._serialized.endsWith('@g.us'))
+            .map(chat => ({
+                id: chat.id._serialized,
+                name: chat.name || 'Unknown Group'
+            }));
         res.json(groups);
     } catch (error) {
         console.error('Error fetching groups:', error);
@@ -457,22 +419,14 @@ app.get('/groups', async (req, res) => {
 });
 
 app.post('/send-update', (req, res) => {
-    // If not ready, we still queue it if basic server is up, or return error
     if (!isReady) {
-        // Soft fail: returning 503 triggers retry in frontend
         return res.status(503).json({ error: 'WhatsApp not connected' });
     }
 
     const { logId, groupId, message, imageUrls } = req.body;
-    
-    console.log(`[API] Received update request for Group: ${groupId}, LogID: ${logId}`);
 
     if (!groupId) {
         return res.status(400).json({ error: 'Missing groupId' });
-    }
-
-    if ((!message || message.trim() === '') && (!imageUrls || imageUrls.length === 0)) {
-        return res.status(400).json({ error: 'At least a message or an image is required' });
     }
 
     jobQueue.push({ logId, groupId, message, imageUrls });
