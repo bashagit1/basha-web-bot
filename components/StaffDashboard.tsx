@@ -20,7 +20,9 @@ import {
   Smile,
   ChevronDown,
   Layout,
-  Video
+  Video,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 
 const StaffDashboard: React.FC = () => {
@@ -33,6 +35,7 @@ const StaffDashboard: React.FC = () => {
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isValidatingVideo, setIsValidatingVideo] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
   
   const topRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLDivElement>(null);
@@ -45,6 +48,8 @@ const StaffDashboard: React.FC = () => {
     if (category && formRef.current) {
         formRef.current.scrollIntoView({ behavior: 'smooth' });
     }
+    // Reset mute state when category changes
+    setIsMuted(false);
   }, [category]);
 
   const loadResidents = async () => {
@@ -300,7 +305,8 @@ const StaffDashboard: React.FC = () => {
             category: category,
             notes: notes,
             imageUrls: finalImages,
-            aiGeneratedMessage: aiMessage
+            aiGeneratedMessage: aiMessage,
+            isMuted: isMuted // Pass mute preference
         });
         
         setSubmitStatus('success');
@@ -312,6 +318,7 @@ const StaffDashboard: React.FC = () => {
             setCategory(null);
             setNotes('');
             setImages([]);
+            setIsMuted(false);
             setSelectedResidentId('');
         }, 3000);
 
@@ -567,6 +574,36 @@ const StaffDashboard: React.FC = () => {
                         </div>
                       )}
                     </div>
+                    
+                    {/* VIDEO MUTE TOGGLE */}
+                    {category === UpdateCategory.VIDEO && images.length > 0 && (
+                        <div 
+                            onClick={() => setIsMuted(!isMuted)}
+                            className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${
+                                isMuted 
+                                ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800' 
+                                : 'bg-slate-50 dark:bg-slate-900/50 border-slate-200 dark:border-slate-700'
+                            }`}
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${isMuted ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400' : 'bg-slate-200 dark:bg-slate-800 text-slate-500'}`}>
+                                    {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                                </div>
+                                <div className="text-left">
+                                    <p className={`font-bold text-sm ${isMuted ? 'text-amber-800 dark:text-amber-200' : 'text-slate-700 dark:text-slate-300'}`}>
+                                        {isMuted ? 'Muted (Send without Audio)' : 'Sound On'}
+                                    </p>
+                                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                                        {isMuted ? 'Video will be silent and may loop.' : 'Video will play with original audio.'}
+                                    </p>
+                                </div>
+                            </div>
+                            
+                            <div className={`w-12 h-6 rounded-full p-1 transition-colors duration-300 ${isMuted ? 'bg-amber-500' : 'bg-slate-300 dark:bg-slate-600'}`}>
+                                <div className={`bg-white w-4 h-4 rounded-full shadow-sm transform transition-transform duration-300 ${isMuted ? 'translate-x-6' : 'translate-x-0'}`} />
+                            </div>
+                        </div>
+                    )}
                   </div>
 
                   <div className="space-y-4">

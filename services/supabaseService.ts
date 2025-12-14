@@ -226,7 +226,8 @@ export const LiveDB = {
             notes: logData.notes,
             image_urls: logData.imageUrls, 
             status: 'PENDING',
-            ai_generated_message: logData.aiGeneratedMessage
+            ai_generated_message: logData.aiGeneratedMessage,
+            is_muted: logData.isMuted || false // Save Mute preference
         }])
         .select()
         .single();
@@ -255,7 +256,8 @@ export const LiveDB = {
                     notes: fallbackNotes,
                     image_urls: fallbackImages,
                     status: 'PENDING',
-                    ai_generated_message: logData.aiGeneratedMessage
+                    ai_generated_message: logData.aiGeneratedMessage,
+                    is_muted: logData.isMuted || false
                 }])
                 .select()
                 .single();
@@ -296,7 +298,8 @@ export const LiveDB = {
             logId: newLogId, // Pass ID so bot can update status on failure
             groupId: residentGroupId,
             message: logData.aiGeneratedMessage || '', 
-            imageUrls: logData.imageUrls 
+            imageUrls: logData.imageUrls,
+            isMuted: logData.isMuted || false // Pass mute flag to bot
           })
         }, 1, 300000); 
 
@@ -349,7 +352,8 @@ export const LiveDB = {
             logId: log.id,
             groupId: residentGroupId,
             message: log.aiGeneratedMessage || '',
-            imageUrls: log.imageUrls 
+            imageUrls: log.imageUrls,
+            isMuted: log.isMuted || false
             })
         }, 3, 5000);
 
@@ -387,7 +391,8 @@ export const LiveDB = {
         notes: l.notes,
         imageUrls: l.image_urls || [],
         status: l.status,
-        aiGeneratedMessage: l.ai_generated_message
+        aiGeneratedMessage: l.ai_generated_message,
+        isMuted: l.is_muted
     }));
   },
 

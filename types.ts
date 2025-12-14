@@ -35,6 +35,7 @@ export interface ActivityLog {
   imageUrls: string[];
   status: 'PENDING' | 'SENT' | 'FAILED';
   aiGeneratedMessage?: string;
+  isMuted?: boolean;
 }
 
 export interface Staff {

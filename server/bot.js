@@ -308,7 +308,7 @@ async function processQueue() {
 }
 
 async function processJob(job) {
-    const { groupId, message, imageUrls } = job;
+    const { groupId, message, imageUrls, isMuted } = job;
     const hasImages = imageUrls && imageUrls.length > 0;
     const hasText = message && message.trim().length > 0;
 
@@ -356,6 +356,12 @@ async function processJob(job) {
                         // FORCE VIDEO PLAYER PREFERENCE
                         // We attempt to send as video first.
                         options.sendMediaAsDocument = false; 
+                        
+                        // MUTE LOGIC
+                        if (isMuted) {
+                             console.log('[QUEUE] 🔇 Video will be sent as GIF (Muted)');
+                             options.sendVideoAsGif = true;
+                        }
                     }
 
                     console.log(`[QUEUE] Sending media to ${groupId}...`);
@@ -384,9 +390,11 @@ async function processJob(job) {
                             // --- SMART FALLBACK LOGIC ---
                             // If sending as Video failed, we MUST switch to Document mode for the next attempt.
                             // The error "Evaluation failed" means the browser couldn't render the video preview.
+                            // IMPORTANT: sendVideoAsGif also fails if browser lacks codecs, so fallback to Document is still needed.
                             if (isVideo && !options.sendMediaAsDocument) {
                                 console.log('[QUEUE] 🔄 Switching to Document Mode to ensure delivery (System Browser might be missing codecs).');
                                 options.sendMediaAsDocument = true;
+                                options.sendVideoAsGif = false; // Disable GIF mode in fallback to ensure regular file delivery
                             }
 
                             lastError = attemptError;
@@ -470,13 +478,13 @@ app.post('/send-update', (req, res) => {
         return res.status(503).json({ error: 'WhatsApp not connected' });
     }
 
-    const { logId, groupId, message, imageUrls } = req.body;
+    const { logId, groupId, message, imageUrls, isMuted } = req.body;
 
     if (!groupId) {
         return res.status(400).json({ error: 'Missing groupId' });
     }
 
-    jobQueue.push({ logId, groupId, message, imageUrls });
+    jobQueue.push({ logId, groupId, message, imageUrls, isMuted });
     console.log(`[API] Job added to queue. Queue length: ${jobQueue.length}`);
     
     processQueue();
