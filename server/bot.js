@@ -1,5 +1,7 @@
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
+import fs from 'fs';
+import path from 'path';
 
 /**
  * ELDERLY CARE WATCH AI - BOT AGENT
@@ -143,6 +145,43 @@ setInterval(async () => {
     }
 }, 60000); 
 
+// --- BROWSER DETECTION (THE FIX FOR VIDEOS) ---
+function getChromeExecutablePath() {
+    const platform = process.platform;
+    const commonPaths = [];
+
+    if (platform === 'win32') {
+        commonPaths.push(
+            'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+            'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe',
+            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
+        );
+    } else if (platform === 'linux') {
+        commonPaths.push(
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/google-chrome',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium'
+        );
+    } else if (platform === 'darwin') {
+        commonPaths.push(
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+            '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'
+        );
+    }
+
+    for (const p of commonPaths) {
+        if (fs.existsSync(p)) {
+            console.log(`[INIT] Found System Browser: ${p}`);
+            return p;
+        }
+    }
+    
+    console.log('[INIT] No System Browser found. Using bundled Chromium (Video support may be limited).');
+    return null;
+}
+
 // --- INITIALIZATION LOOP ---
 async function startWhatsApp() {
     console.log('Initializing WhatsApp Client...');
@@ -153,38 +192,35 @@ async function startWhatsApp() {
 
     console.log(`Using Auth Path: ${authPath}`);
 
+    const executablePath = getChromeExecutablePath();
+
     try {
         client = new Client({
             authStrategy: new LocalAuth({
                 dataPath: authPath
             }), 
             puppeteer: {
+                // IF WE FOUND A SYSTEM BROWSER, USE IT!
+                executablePath: executablePath || undefined,
+                
+                // CRITICAL STABILITY SETTINGS:
+                // Removed '--single-process' and '--no-zygote' which cause crashes on Windows with System Chrome.
                 args: [
                     '--no-sandbox', 
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
                     '--disable-accelerated-2d-canvas',
                     '--no-first-run',
-                    '--no-zygote',
-                    '--single-process', 
                     '--disable-gpu',
-                    '--shm-size=1gb', 
                     '--disable-extensions',
-                    '--mute-audio',
                     '--disable-software-rasterizer',
-                    '--no-default-browser-check',
-                    '--disable-features=Translate',
-                    '--force-color-profile=srgb',
-                    '--metrics-recording-only',
-                    '--disable-web-security',
-                    '--enable-features=NetworkService',
-                    '--allow-running-insecure-content',
-                    '--disable-ipc-flooding-protection',
-                    // Additional stability flags for media evaluation
-                    '--disable-features=IsolateOrigins,site-per-process' 
                 ],
                 headless: true,
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
+            },
+            // Add WebVersionCache to ensure we load a stable version of WhatsApp Web
+            webVersionCache: {
+                type: 'remote',
+                remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
             }
         });
 
@@ -318,6 +354,7 @@ async function processJob(job) {
                     
                     if (isVideo) {
                         // FORCE VIDEO PLAYER PREFERENCE
+                        // We attempt to send as video first.
                         options.sendMediaAsDocument = false; 
                     }
 
@@ -344,21 +381,18 @@ async function processJob(job) {
                         } catch (attemptError) {
                             console.warn(`[QUEUE] ⚠️ Attempt ${attempt} failed: ${attemptError.message}`);
                             
-                            // --- SMART FALLBACK ---
-                            // If sending as Video failed (Evaluation failed), it usually means the headless browser
-                            // lacks the codec to generate the video thumbnail. 
-                            // We SWITCH to sending as a DOCUMENT which bypasses thumbnail generation.
+                            // --- SMART FALLBACK LOGIC ---
+                            // If sending as Video failed, we MUST switch to Document mode for the next attempt.
+                            // The error "Evaluation failed" means the browser couldn't render the video preview.
                             if (isVideo && !options.sendMediaAsDocument) {
-                                console.log('[QUEUE] 🔄 Switched to Document Mode (Fallback) to ensure delivery.');
+                                console.log('[QUEUE] 🔄 Switching to Document Mode to ensure delivery (System Browser might be missing codecs).');
                                 options.sendMediaAsDocument = true;
-                                // Reset attempt counter to give document mode a fair chance? 
-                                // No, keep loop, but next retry will use document mode.
                             }
 
                             lastError = attemptError;
                             
                             if (attempt < 3) {
-                                const waitTime = attempt * 3000; // 3s, 6s
+                                const waitTime = attempt * 3000; 
                                 await new Promise(r => setTimeout(r, waitTime));
                             }
                         }
