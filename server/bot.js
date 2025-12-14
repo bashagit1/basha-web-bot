@@ -204,16 +204,17 @@ async function startWhatsApp() {
                 executablePath: executablePath || undefined,
                 
                 // CRITICAL STABILITY SETTINGS:
-                // Removed '--single-process' and '--no-zygote' which cause crashes on Windows with System Chrome.
+                // We ENABLE GPU features here to ensure the browser can process media (like resizing video for GIFs)
+                // without crashing or failing.
                 args: [
                     '--no-sandbox', 
                     '--disable-setuid-sandbox',
                     '--disable-dev-shm-usage',
-                    '--disable-accelerated-2d-canvas',
                     '--no-first-run',
-                    '--disable-gpu',
                     '--disable-extensions',
-                    '--disable-software-rasterizer',
+                    '--ignore-gpu-blocklist',
+                    '--enable-gpu-rasterization',
+                    '--enable-features=NetworkService'
                 ],
                 headless: true,
             },
@@ -354,12 +355,11 @@ async function processJob(job) {
                     
                     if (isVideo) {
                         // FORCE VIDEO PLAYER PREFERENCE
-                        // We attempt to send as video first.
                         options.sendMediaAsDocument = false; 
                         
                         // MUTE LOGIC
                         if (isMuted) {
-                             console.log('[QUEUE] 🔇 Video will be sent as GIF (Muted)');
+                             console.log('[QUEUE] 🔇 Video set to Muted (GIF Mode)');
                              options.sendVideoAsGif = true;
                         }
                     }
@@ -389,8 +389,7 @@ async function processJob(job) {
                             
                             // --- SMART FALLBACK LOGIC ---
                             // If sending as Video failed, we MUST switch to Document mode for the next attempt.
-                            // The error "Evaluation failed" means the browser couldn't render the video preview.
-                            // IMPORTANT: sendVideoAsGif also fails if browser lacks codecs, so fallback to Document is still needed.
+                            // The error "Evaluation failed" means the browser couldn't render the video preview/gif.
                             if (isVideo && !options.sendMediaAsDocument) {
                                 console.log('[QUEUE] 🔄 Switching to Document Mode to ensure delivery (System Browser might be missing codecs).');
                                 options.sendMediaAsDocument = true;
