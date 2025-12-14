@@ -293,6 +293,7 @@ export const LiveDB = {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            logId: newLogId, // Pass ID so bot can update status on failure
             groupId: residentGroupId,
             message: logData.aiGeneratedMessage || '', 
             imageUrls: logData.imageUrls 
@@ -340,16 +341,12 @@ export const LiveDB = {
 
     if (!residentGroupId) throw new Error("No WhatsApp Group linked.");
 
-    // Note: If the log in DB only has the placeholder (because original video was too big),
-    // retrying from the frontend using 'log' (which comes from getLogs -> DB) means we will send the placeholder.
-    // This is a limitation of not having the original video stored. 
-    // But for new sends, the code above works.
-
     try {
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
+            logId: log.id,
             groupId: residentGroupId,
             message: log.aiGeneratedMessage || '',
             imageUrls: log.imageUrls 

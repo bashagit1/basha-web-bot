@@ -72,7 +72,7 @@ if (!process.env.SUPABASE_URL && !process.env.SUPABASE_ANON_KEY) {
 let supabase = null;
 if (createClient) {
     supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
-    console.log('✅ Supabase connected for maintenance tasks');
+    console.log('✅ Supabase connected for maintenance & error reporting');
 }
 
 // --- GLOBAL STATE & QUEUE ---
@@ -212,7 +212,8 @@ async function startWhatsApp() {
                     '--no-default-browser-check',
                     '--disable-features=Translate',
                     '--force-color-profile=srgb',
-                    '--metrics-recording-only'
+                    '--metrics-recording-only',
+                    '--disable-web-security' // Potentially helps with blob upload restrictions
                 ],
                 headless: true,
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
@@ -285,6 +286,16 @@ async function processQueue() {
         await processJob(job);
     } catch (err) {
         console.error(`[QUEUE] Job Failed:`, err);
+        
+        // --- ERROR FEEDBACK LOOP ---
+        // If the job fails (e.g. video upload timeout), report back to Supabase
+        if (job.logId && supabase) {
+             console.log(`[QUEUE] Reporting failure back to DB for log ${job.logId}...`);
+             supabase.from('activity_logs').update({ status: 'FAILED' }).eq('id', job.logId)
+                .then(() => console.log('   -> DB Updated to FAILED'))
+                .catch(e => console.error('   -> DB Update Failed:', e));
+        }
+
     } finally {
         isProcessingQueue = false;
         lastJobStartTime = 0; 
@@ -292,21 +303,6 @@ async function processQueue() {
         setTimeout(processQueue, 1000); 
     }
 }
-
-// HELPER: Determine Extension from Mime Type
-// IMPORTANT: WhatsApp requires correct extensions for video types.
-const getExtension = (mime) => {
-    if (mime.includes('video/mp4')) return 'mp4';
-    // FORCE MP4 extension for WebM to trick WhatsApp into treating it as video (often works for containers)
-    if (mime.includes('video/webm')) return 'mp4'; 
-    if (mime.includes('video/3gpp')) return '3gp';
-    // FORCE MP4 extension for MOV (QuickTime)
-    if (mime.includes('video/quicktime')) return 'mp4'; 
-    if (mime.includes('image/png')) return 'png';
-    if (mime.includes('image/jpeg')) return 'jpg';
-    if (mime.includes('image/webp')) return 'webp';
-    return 'dat'; // Fallback
-};
 
 async function processJob(job) {
     const { groupId, message, imageUrls } = job;
@@ -326,17 +322,23 @@ async function processJob(job) {
                     let mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
                     const data = parts[1];
 
-                    // --- CRITICAL VIDEO FIX ---
-                    // WhatsApp Web does NOT support 'video/quicktime' (iOS .mov)
-                    // We must lie to the MessageMedia constructor to say it is 'video/mp4'
-                    // This forces WhatsApp to attempt to play the container, which often works for h.264 movs.
-                    if (mime === 'video/quicktime' || mime === 'video/mov') {
-                        console.log('[QUEUE] ⚠️ Detected iOS MOV video. Masquerading as MP4 for WhatsApp compatibility.');
+                    // --- UNIVERSAL VIDEO FIX ---
+                    // WhatsApp Web is extremely picky about MIME types and Extensions.
+                    // If it sees 'video/webm' or 'video/quicktime', it might reject it or send as doc.
+                    // We force EVERYTHING video-related to be treated as 'video/mp4'.
+                    // The underlying container (h.264, vp8) is usually handled by the receiver's player.
+                    let ext = 'jpg';
+                    if (mime.startsWith('video/')) {
+                        console.log(`[QUEUE] ⚠️ Masquerading ${mime} as video/mp4 for WhatsApp compatibility.`);
                         mime = 'video/mp4'; 
+                        ext = 'mp4';
+                    } else {
+                         // Simple image extension logic
+                         if (mime.includes('png')) ext = 'png';
+                         else if (mime.includes('webp')) ext = 'webp';
+                         else ext = 'jpg';
                     }
                     
-                    // IMPROVED EXTENSION DETECTION
-                    const ext = getExtension(mime);
                     const filename = `update_${Date.now()}_${i}.${ext}`;
                     
                     media = new MessageMedia(mime, data, filename);
@@ -374,10 +376,12 @@ async function processJob(job) {
                 }
             } catch (imgErr) {
                 console.error(`[QUEUE] ❌ Error sending media ${i+1}:`, imgErr.message);
+                throw imgErr; // Rethrow to trigger the 'catch' block in processQueue (updating DB)
             } finally {
                 media = null; 
             }
-            await new Promise(r => setTimeout(r, 1000));
+            // Small delay between media items to prevent flooding/bans
+            await new Promise(r => setTimeout(r, 2000));
         }
     } 
     // SCENARIO 2: Text Only (No Media)
@@ -387,6 +391,7 @@ async function processJob(job) {
             console.log('[QUEUE] Text message sent.');
         } catch (e) {
             console.error('[QUEUE] Failed to send text:', e.message);
+            throw e;
         }
     }
 }
@@ -454,9 +459,9 @@ app.post('/send-update', (req, res) => {
         return res.status(503).json({ error: 'WhatsApp not connected' });
     }
 
-    const { groupId, message, imageUrls } = req.body;
+    const { logId, groupId, message, imageUrls } = req.body;
     
-    console.log(`[API] Received update request for Group: ${groupId}, Media Count: ${imageUrls?.length || 0}`);
+    console.log(`[API] Received update request for Group: ${groupId}, LogID: ${logId}`);
 
     if (!groupId) {
         return res.status(400).json({ error: 'Missing groupId' });
@@ -466,7 +471,7 @@ app.post('/send-update', (req, res) => {
         return res.status(400).json({ error: 'At least a message or an image is required' });
     }
 
-    jobQueue.push({ groupId, message, imageUrls });
+    jobQueue.push({ logId, groupId, message, imageUrls });
     console.log(`[API] Job added to queue. Queue length: ${jobQueue.length}`);
     
     processQueue();
