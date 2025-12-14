@@ -288,6 +288,7 @@ export const LiveDB = {
         console.log(`Sending to Bot: ${BOT_SERVER_URL}`);
         
         // VITAL: We use 'logData.imageUrls' (Original Full Data), NOT what we saved to DB.
+        // TIMEOUT INCREASED TO 300000ms (5 MINUTES) FOR SLOW MOBILE UPLOADS
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -296,7 +297,7 @@ export const LiveDB = {
             message: logData.aiGeneratedMessage || '', 
             imageUrls: logData.imageUrls 
           })
-        }, 1, 150000); // 1 Retry, but HUGE timeout (150s) to allow video upload to bot
+        }, 1, 300000); 
 
         if (response.ok) {
             finalStatus = 'SENT';

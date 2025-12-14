@@ -297,9 +297,11 @@ async function processQueue() {
 // IMPORTANT: WhatsApp requires correct extensions for video types.
 const getExtension = (mime) => {
     if (mime.includes('video/mp4')) return 'mp4';
-    if (mime.includes('video/webm')) return 'webm'; // Keep as webm so browser/WA knows how to handle it
+    // FORCE MP4 extension for WebM to trick WhatsApp into treating it as video (often works for containers)
+    if (mime.includes('video/webm')) return 'mp4'; 
     if (mime.includes('video/3gpp')) return '3gp';
-    if (mime.includes('video/quicktime')) return 'mov'; // iPhone recording
+    // FORCE MP4 extension for MOV (QuickTime)
+    if (mime.includes('video/quicktime')) return 'mp4'; 
     if (mime.includes('image/png')) return 'png';
     if (mime.includes('image/jpeg')) return 'jpg';
     if (mime.includes('image/webp')) return 'webp';
@@ -321,27 +323,42 @@ async function processJob(job) {
                 if (url.startsWith('data:')) {
                     const parts = url.split(',');
                     const mimeMatch = parts[0].match(/:(.*?);/);
-                    const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
+                    let mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
                     const data = parts[1];
+
+                    // --- CRITICAL VIDEO FIX ---
+                    // WhatsApp Web does NOT support 'video/quicktime' (iOS .mov)
+                    // We must lie to the MessageMedia constructor to say it is 'video/mp4'
+                    // This forces WhatsApp to attempt to play the container, which often works for h.264 movs.
+                    if (mime === 'video/quicktime' || mime === 'video/mov') {
+                        console.log('[QUEUE] ⚠️ Detected iOS MOV video. Masquerading as MP4 for WhatsApp compatibility.');
+                        mime = 'video/mp4'; 
+                    }
                     
                     // IMPROVED EXTENSION DETECTION
                     const ext = getExtension(mime);
                     const filename = `update_${Date.now()}_${i}.${ext}`;
                     
                     media = new MessageMedia(mime, data, filename);
+                    console.log(`[QUEUE] Created Media Object: ${mime} size=${Math.round(data.length/1024)}KB`);
+
                 } else {
                     media = await MessageMedia.fromUrl(url);
                 }
                 
                 if (media) {
                     // Send media with caption (if it's the first/only item and there is text)
-                    // Attaching text as caption improves deliverability for videos
                     const options = {};
                     if (hasText && i === imageUrls.length - 1) {
                          options.caption = message;
                     }
+                    
+                    // Force video handling flags
+                    if (media.mimetype.includes('video')) {
+                        options.sendMediaAsDocument = false; // Force video view
+                    }
 
-                    console.log(`[QUEUE] Sending media (${media.mimetype}). Size: ${media.data.length} bytes.`);
+                    console.log(`[QUEUE] Sending media to ${groupId}...`);
 
                     const sendPromise = client.sendMessage(groupId, media, options);
                     
@@ -353,18 +370,15 @@ async function processJob(job) {
                     );
                     
                     await Promise.race([sendPromise, timeoutPromise]);
-                    console.log(`[QUEUE] Sent media ${i + 1}/${imageUrls.length}`);
+                    console.log(`[QUEUE] ✅ Sent media ${i + 1}/${imageUrls.length}`);
                 }
             } catch (imgErr) {
-                console.error(`[QUEUE] Error sending media ${i+1}:`, imgErr.message);
+                console.error(`[QUEUE] ❌ Error sending media ${i+1}:`, imgErr.message);
             } finally {
                 media = null; 
             }
             await new Promise(r => setTimeout(r, 1000));
         }
-        
-        // If we attached text as caption, we are done. 
-        // If we have multiple images, we only attached caption to the last one.
     } 
     // SCENARIO 2: Text Only (No Media)
     else if (hasText) {

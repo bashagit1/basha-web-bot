@@ -120,6 +120,13 @@ const StaffDashboard: React.FC = () => {
             return;
         }
 
+        // Safety check for raw file size
+        if (file.size > 60 * 1024 * 1024) {
+             alert("File is too large (>60MB). Please record a shorter video.");
+             e.target.value = '';
+             return;
+        }
+
         setIsValidatingVideo(true);
 
         try {
@@ -141,13 +148,6 @@ const StaffDashboard: React.FC = () => {
                 // Clear input
                 e.target.value = '';
                 return;
-            }
-
-            // 100MB Hard Limit safety check (20s shouldn't reach this, but safety first)
-            if (file.size > 100 * 1024 * 1024) {
-                 alert("Video file size is too large despite short duration.");
-                 setIsValidatingVideo(false);
-                 return;
             }
 
             const reader = new FileReader();
