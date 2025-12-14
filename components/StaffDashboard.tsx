@@ -692,7 +692,7 @@ const StaffDashboard: React.FC = () => {
                     <>
                       <Loader2 className="w-6 h-6 animate-spin" />
                       <span>
-                          {category === UpdateCategory.VITALS && images.length > 1 ? 'Stitching & Sending...' : 'Sending...'}
+                          {category === UpdateCategory.VITALS && images.length > 1 ? 'Stitching & Sending...' : category === UpdateCategory.VIDEO ? 'Uploading Video...' : 'Sending...'}
                       </span>
                     </>
                   ) : (

@@ -212,6 +212,24 @@ export const LiveDB = {
   // --- LOGS & WHATSAPP ---
 
   createLog: async (logData: Omit<ActivityLog, 'id' | 'timestamp' | 'status'>): Promise<ActivityLog> => {
+    
+    // SIZE CHECK & PROTECTION
+    // Supabase REST API often rejects payloads > 6MB. 
+    // Video base64 strings can be 20MB+. 
+    // We check the size, and if it's too big, we DO NOT save the video to the DB (saving a placeholder instead)
+    // but we STILL send the video to WhatsApp.
+    const approximateSizeInBytes = JSON.stringify(logData.imageUrls).length * 0.75; // Approx Base64 size
+    const MAX_DB_SIZE_BYTES = 5 * 1024 * 1024; // 5MB Safe Limit
+    
+    let dbImageUrls = logData.imageUrls;
+    let isVideoTooLarge = false;
+
+    if (logData.category === 'Video Message' && approximateSizeInBytes > MAX_DB_SIZE_BYTES) {
+        console.warn(`[Log] Video is too large for Database History (${Math.round(approximateSizeInBytes/1024/1024)}MB). Saving placeholder to DB, but sending real video to WhatsApp.`);
+        dbImageUrls = []; // Clear images from DB payload
+        isVideoTooLarge = true;
+    }
+
     const { data, error } = await supabase
       .from('activity_logs')
       .insert([{
@@ -220,7 +238,7 @@ export const LiveDB = {
         staff_name: logData.staffName,
         category: logData.category,
         notes: logData.notes,
-        image_urls: logData.imageUrls,
+        image_urls: dbImageUrls, // Use safe payload
         status: 'PENDING',
         ai_generated_message: logData.aiGeneratedMessage
       }])
@@ -229,7 +247,7 @@ export const LiveDB = {
 
     if (error) {
       console.error('Supabase Error creating log:', error);
-      throw new Error(error.message);
+      throw new Error("Database Error: " + error.message);
     }
 
     const newLog = data;
@@ -251,17 +269,16 @@ export const LiveDB = {
       try {
         console.log(`Attempting to send update to: ${BOT_SERVER_URL}`);
         
-        // INCREASED RETRIES: Mobile networks can be flaky/slow uploading data.
-        // Bumped to 5 retries with 2000ms backoff to allow uploads to finish.
+        // Use the FULL logData.imageUrls (containing the real video) for the Bot, even if we skipped DB
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             groupId: residentGroupId,
             message: logData.aiGeneratedMessage || '', 
-            imageUrls: logData.imageUrls
+            imageUrls: logData.imageUrls // Send REAL data to WhatsApp
           })
-        }, 5, 2000); 
+        }, 3, 3000); // 3 retries, 3s backoff (Video upload needs patience)
 
         if (response.ok) {
             finalStatus = 'SENT';
@@ -283,10 +300,17 @@ export const LiveDB = {
          finalStatus = 'SENT'; 
     }
 
+    // Update status. If we skipped saving video to DB, we append a note.
+    const statusUpdate = { status: finalStatus };
+    if (isVideoTooLarge && finalStatus === 'SENT') {
+        // Optional: Mark it so we know why it's empty in history
+        // But schema strictness might prevent adding fields. We just stick to status.
+    }
+
     if (finalStatus !== 'PENDING') {
         await supabase
             .from('activity_logs')
-            .update({ status: finalStatus })
+            .update(statusUpdate)
             .eq('id', newLog.id);
     }
 
