@@ -294,15 +294,16 @@ async function processQueue() {
 }
 
 // HELPER: Determine Extension from Mime Type
+// IMPORTANT: WhatsApp requires correct extensions for video types.
 const getExtension = (mime) => {
     if (mime.includes('video/mp4')) return 'mp4';
-    if (mime.includes('video/webm')) return 'mp4'; // WhatsApp prefers mp4 container even for webm streams often
+    if (mime.includes('video/webm')) return 'webm'; // Keep as webm so browser/WA knows how to handle it
     if (mime.includes('video/3gpp')) return '3gp';
-    if (mime.includes('video/quicktime')) return 'mov';
+    if (mime.includes('video/quicktime')) return 'mov'; // iPhone recording
     if (mime.includes('image/png')) return 'png';
     if (mime.includes('image/jpeg')) return 'jpg';
     if (mime.includes('image/webp')) return 'webp';
-    return mime.split('/')[1] || 'dat';
+    return 'dat'; // Fallback
 };
 
 async function processJob(job) {
@@ -310,7 +311,7 @@ async function processJob(job) {
     const hasImages = imageUrls && imageUrls.length > 0;
     const hasText = message && message.trim().length > 0;
 
-    // 1. Send Images (or Video)
+    // SCENARIO 1: Media (Images or Video)
     if (hasImages) {
         for (let i = 0; i < imageUrls.length; i++) {
             const url = imageUrls[i];
@@ -325,21 +326,32 @@ async function processJob(job) {
                     
                     // IMPROVED EXTENSION DETECTION
                     const ext = getExtension(mime);
+                    const filename = `update_${Date.now()}_${i}.${ext}`;
                     
-                    media = new MessageMedia(mime, data, `update_${Date.now()}_${i}.${ext}`);
+                    media = new MessageMedia(mime, data, filename);
                 } else {
                     media = await MessageMedia.fromUrl(url);
                 }
                 
                 if (media) {
-                    // Send media
-                    const sendPromise = client.sendMessage(groupId, media);
+                    // Send media with caption (if it's the first/only item and there is text)
+                    // Attaching text as caption improves deliverability for videos
+                    const options = {};
+                    if (hasText && i === imageUrls.length - 1) {
+                         options.caption = message;
+                    }
+
+                    console.log(`[QUEUE] Sending media (${media.mimetype}). Size: ${media.data.length} bytes.`);
+
+                    const sendPromise = client.sendMessage(groupId, media, options);
+                    
                     // Increased timeout for video uploads to 5 minutes (300000ms)
                     const timeoutSeconds = media.mimetype.includes('video') ? 300000 : 30000;
                     
                     const timeoutPromise = new Promise((_, reject) => 
                         setTimeout(() => reject(new Error('Timeout sending media')), timeoutSeconds)
                     );
+                    
                     await Promise.race([sendPromise, timeoutPromise]);
                     console.log(`[QUEUE] Sent media ${i + 1}/${imageUrls.length}`);
                 }
@@ -350,10 +362,12 @@ async function processJob(job) {
             }
             await new Promise(r => setTimeout(r, 1000));
         }
-    }
-
-    // 2. Send Text
-    if (hasText) {
+        
+        // If we attached text as caption, we are done. 
+        // If we have multiple images, we only attached caption to the last one.
+    } 
+    // SCENARIO 2: Text Only (No Media)
+    else if (hasText) {
         try {
             await client.sendMessage(groupId, message);
             console.log('[QUEUE] Text message sent.');

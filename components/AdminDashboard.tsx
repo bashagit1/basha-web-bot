@@ -262,6 +262,7 @@ const AdminDashboard: React.FC = () => {
   };
 
   const downloadSingleImage = async (img: any) => {
+    if (img.isPlaceholder) return;
     try {
         const response = await fetch(img.url);
         const blob = await response.blob();
@@ -325,7 +326,7 @@ const AdminDashboard: React.FC = () => {
         const zip = new JSZip();
         const folder = zip.folder("CareWatch_Memories");
         
-        const imagesToDownload = allImages.filter(img => selectedImageIds.has(img.id));
+        const imagesToDownload = allImages.filter(img => selectedImageIds.has(img.id) && !img.isPlaceholder);
         
         await Promise.all(imagesToDownload.map(async (img) => {
             try {
@@ -364,6 +365,11 @@ const AdminDashboard: React.FC = () => {
   // --- HELPER: DETECT VIDEO ---
   const isVideoUrl = (url: string) => {
       return url.startsWith('data:video') || url.endsWith('.mp4');
+  };
+  
+  const isPlaceholderUrl = (url: string) => {
+      // The 1x1 pixel placeholder
+      return url.startsWith('data:image/png;base64,iVBORw0KGgo');
   };
 
   const StatCard = ({ title, value, icon, color, darkColor }: any) => (
@@ -711,7 +717,8 @@ const AdminDashboard: React.FC = () => {
             date: log.timestamp,
             notes: log.notes,
             staff: log.staffName,
-            isVideo: isVideoUrl(url)
+            isVideo: isVideoUrl(url),
+            isPlaceholder: isPlaceholderUrl(url) // Detected here
         }))
     );
 
@@ -819,6 +826,7 @@ const AdminDashboard: React.FC = () => {
                         <div 
                             key={img.id} 
                             onClick={(e) => {
+                                if (img.isPlaceholder) return;
                                 if (isSelectionMode) toggleImageSelection(img.id, e);
                                 else setSelectedImage(img);
                             }}
@@ -828,7 +836,15 @@ const AdminDashboard: React.FC = () => {
                                 : 'border-slate-100 dark:border-slate-700 hover:-translate-y-1'
                             }`}
                         >
-                            {img.isVideo ? (
+                            {img.isPlaceholder ? (
+                                <div className="w-full h-full flex flex-col items-center justify-center bg-slate-100 dark:bg-slate-800 p-4 text-center">
+                                    <div className="w-12 h-12 bg-slate-200 dark:bg-slate-700 rounded-full flex items-center justify-center mb-2">
+                                        <CheckCircle className="w-6 h-6 text-green-500" />
+                                    </div>
+                                    <p className="font-bold text-slate-700 dark:text-white text-xs">Video Sent</p>
+                                    <p className="text-[10px] text-slate-400 mt-1">Archived to save space</p>
+                                </div>
+                            ) : img.isVideo ? (
                                 <video src={img.url} className="w-full h-full object-cover" />
                             ) : (
                                 <img 
@@ -839,7 +855,7 @@ const AdminDashboard: React.FC = () => {
                                 />
                             )}
 
-                            {img.isVideo && (
+                            {img.isVideo && !img.isPlaceholder && (
                                 <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                                     <div className="w-12 h-12 bg-black/40 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/30">
                                         <div className="w-0 h-0 border-t-[8px] border-t-transparent border-l-[14px] border-l-white border-b-[8px] border-b-transparent ml-1"></div>
@@ -847,7 +863,7 @@ const AdminDashboard: React.FC = () => {
                                 </div>
                             )}
                             
-                            {isSelectionMode && (
+                            {isSelectionMode && !img.isPlaceholder && (
                                 <div className="absolute inset-0 bg-black/10 flex items-start justify-end p-3">
                                     <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${
                                         isSelected ? 'bg-brand-500 text-white' : 'bg-black/40 text-white/50 border border-white/50'
@@ -857,7 +873,7 @@ const AdminDashboard: React.FC = () => {
                                 </div>
                             )}
 
-                            {!isSelectionMode && (
+                            {!isSelectionMode && !img.isPlaceholder && (
                                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
                                     <p className="text-white font-bold text-sm truncate">{img.resident}</p>
                                     <div className="flex items-center justify-between mt-1">
