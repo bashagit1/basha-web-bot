@@ -202,10 +202,21 @@ export const LiveDB = {
 
   createLog: async (logData: Omit<ActivityLog, 'id' | 'timestamp' | 'status'>): Promise<ActivityLog> => {
     
-    // NOTE: We trust the 20-second video limit from the frontend to keep payload sizes reasonable.
-    // We attempt to save to DB first so it appears in the gallery.
+    // PERFORMANCE FIX: Video handling
+    // Video files (even 20s) are heavy (10MB+). Saving them to Supabase often causes "Payload Too Large"
+    // or timeouts, blocking the WhatsApp send.
+    // SOLUTION: We DO NOT save the video file to Supabase. We only save the metadata.
+    // We send the actual video bytes ONLY to the WhatsApp Bot.
     
     let dbImageUrls = logData.imageUrls;
+    let finalNotes = logData.notes;
+    
+    if (logData.category === 'Video Message') {
+        console.log("Optimizing Video Upload: Skipping DB storage for video file to ensure speed.");
+        dbImageUrls = []; // CLEAR IMAGES FOR DB
+        finalNotes = (logData.notes || '') + ' [Video Sent to Family via WhatsApp]';
+    }
+
     let newLog: any = null;
 
     try {
@@ -216,8 +227,8 @@ export const LiveDB = {
             resident_name: logData.residentName,
             staff_name: logData.staffName,
             category: logData.category,
-            notes: logData.notes,
-            image_urls: dbImageUrls, 
+            notes: finalNotes,
+            image_urls: dbImageUrls, // Optimized payload
             status: 'PENDING',
             ai_generated_message: logData.aiGeneratedMessage
         }])
@@ -228,32 +239,12 @@ export const LiveDB = {
         newLog = data;
 
     } catch (dbError: any) {
-        // FALLBACK STRATEGY
-        // If the video was still too big for Supabase (Payload Too Large),
-        // we create the log WITHOUT the video data so at least the record exists,
-        // and then we try to send the video to WhatsApp anyway.
-        console.warn('DB Insert failed (likely size). Retrying without media payload for DB history.', dbError);
-        
-        const { data, error } = await supabase
-            .from('activity_logs')
-            .insert([{
-                resident_id: logData.residentId,
-                resident_name: logData.residentName,
-                staff_name: logData.staffName,
-                category: logData.category,
-                notes: logData.notes + ' [Video too large for history]',
-                image_urls: [], // Empty for DB
-                status: 'PENDING',
-                ai_generated_message: logData.aiGeneratedMessage
-            }])
-            .select()
-            .single();
-            
-        if (error) throw new Error("Database Error: " + error.message);
-        newLog = data;
+        console.error('DB Insert failed:', dbError);
+        throw new Error("Database connection failed. Please check internet.");
     }
 
     // --- WHATSAPP SENDING ---
+    // We fetch the group ID
     const { data: residentData } = await supabase
         .from('residents')
         .select('whatsapp_group_id')
@@ -264,14 +255,15 @@ export const LiveDB = {
     let finalStatus = 'PENDING';
     
     const hasMessage = logData.aiGeneratedMessage && logData.aiGeneratedMessage.trim() !== '';
+    // Use original logData.imageUrls (containing video) for WhatsApp
     const hasImages = logData.imageUrls && logData.imageUrls.length > 0;
 
     if (residentGroupId && (hasMessage || hasImages)) {
       try {
-        console.log(`Attempting to send update to: ${BOT_SERVER_URL}`);
+        console.log(`Sending to Bot: ${BOT_SERVER_URL}`);
         
-        // Always send the FULL `logData.imageUrls` to the bot, 
-        // even if we had to strip it from the DB.
+        // IMPORTANT: We send the FULL video data to the bot here.
+        // We set a longer timeout for the fetch itself.
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -280,19 +272,20 @@ export const LiveDB = {
             message: logData.aiGeneratedMessage || '', 
             imageUrls: logData.imageUrls 
           })
-        }, 3, 3000); 
+        }, 1, 1000); // Reduce retries to avoid duplicate video sends, rely on long timeout
 
         if (response.ok) {
             finalStatus = 'SENT';
         } else {
-            console.warn(`Bot server responded with ${response.status}: ${response.statusText}`);
+            console.warn(`Bot server error: ${response.statusText}`);
             finalStatus = 'FAILED';
         }
       } catch (err: any) {
-        console.warn(`Bot server unreachable at ${BOT_SERVER_URL}`, err);
+        console.warn(`Bot server unreachable`, err);
         finalStatus = 'FAILED';
       }
     } else if (residentGroupId) {
+         // No content to send, but log created
          finalStatus = 'SENT'; 
     }
 
@@ -319,11 +312,8 @@ export const LiveDB = {
         .single();
         
     const residentGroupId = residentData?.whatsapp_group_id;
-    const residentName = residentData?.name || "Unknown";
 
-    if (!residentGroupId) {
-        throw new Error(`Resident "${residentName}" has no WhatsApp Group linked. Please edit the resident and select a group.`);
-    }
+    if (!residentGroupId) throw new Error("No WhatsApp Group linked.");
 
     try {
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
@@ -332,13 +322,12 @@ export const LiveDB = {
             body: JSON.stringify({
             groupId: residentGroupId,
             message: log.aiGeneratedMessage || '',
-            imageUrls: log.imageUrls
+            imageUrls: log.imageUrls // This might be empty if it was a video log retrieved from DB, but for retry of failed *video* log, we can't recover the video unless we stored it.
+            // Limitation: If video wasn't stored in DB (our optimization), we can't retry sending the video if it failed the first time.
             })
-        }, 5, 2000);
+        }, 3, 2000);
 
-        if (!response.ok) {
-            throw new Error("Retry failed. Bot rejected the request.");
-        }
+        if (!response.ok) throw new Error("Bot rejected request.");
 
         await supabase
             .from('activity_logs')
@@ -346,9 +335,6 @@ export const LiveDB = {
             .eq('id', log.id);
 
     } catch (err: any) {
-        if (err.name === 'TypeError' && err.message === 'Failed to fetch') {
-            throw new Error(`Connection Refused: The Bot Server (${BOT_SERVER_URL}) seems to be offline. Ensure 'npm run start:bot' is running on your PC.`);
-        }
         throw err;
     }
   },

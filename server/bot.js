@@ -329,8 +329,8 @@ async function processJob(job) {
                 if (media) {
                     // Send media
                     const sendPromise = client.sendMessage(groupId, media);
-                    // Increased timeout for video uploads
-                    const timeoutSeconds = media.mimetype.includes('video') ? 60000 : 20000;
+                    // Increased timeout for video uploads to 5 minutes (300000ms)
+                    const timeoutSeconds = media.mimetype.includes('video') ? 300000 : 20000;
                     
                     const timeoutPromise = new Promise((_, reject) => 
                         setTimeout(() => reject(new Error('Timeout sending media')), timeoutSeconds)
