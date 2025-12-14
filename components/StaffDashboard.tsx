@@ -32,6 +32,7 @@ const StaffDashboard: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitStatus, setSubmitStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isValidatingVideo, setIsValidatingVideo] = useState(false);
   
   const topRef = useRef<HTMLDivElement>(null);
   const formRef = useRef<HTMLDivElement>(null);
@@ -60,16 +61,11 @@ const StaffDashboard: React.FC = () => {
   // --- SMART IMAGE RESIZER (Mobile Optimized) ---
   const resizeImage = (file: File): Promise<string> => {
     return new Promise((resolve) => {
-        // use URL.createObjectURL for much faster loading on mobile devices
         const img = new Image();
         const objectUrl = URL.createObjectURL(file);
         
         img.onload = () => {
             const canvas = document.createElement('canvas');
-            
-            // OPTIMIZED: 500px max width. 
-            // This is the "Sweet Spot" for Mobile-to-PC local transfer.
-            // Small enough (~20KB) to send instantly, big enough for WhatsApp phone screens.
             const maxWidth = 500; 
             const scaleSize = maxWidth / img.width;
             const width = (img.width > maxWidth) ? maxWidth : img.width;
@@ -79,17 +75,13 @@ const StaffDashboard: React.FC = () => {
             canvas.height = height;
             const ctx = canvas.getContext('2d');
             ctx?.drawImage(img, 0, 0, width, height);
-            
-            // Clean up memory immediately
             URL.revokeObjectURL(objectUrl);
-            
-            // JPEG at 0.3 quality. Extremely light.
             resolve(canvas.toDataURL('image/jpeg', 0.3));
         };
         
         img.onerror = () => {
             URL.revokeObjectURL(objectUrl);
-            resolve(""); // Skip broken images
+            resolve(""); 
         };
 
         img.src = objectUrl;
@@ -99,16 +91,12 @@ const StaffDashboard: React.FC = () => {
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
-      
-      // Limit images based on category
       const limit = category === UpdateCategory.VITALS ? 3 : 10; 
       if (images.length >= limit) {
          alert(`Maximum ${limit} image(s) allowed for this category.`);
          return;
       }
-
       try {
-        // Resize immediately upon selection
         const resizedBase64 = await resizeImage(file);
         if (resizedBase64) {
             setImages(prev => [...prev, resizedBase64]);
@@ -122,6 +110,7 @@ const StaffDashboard: React.FC = () => {
     }
   };
 
+  // --- VIDEO VALIDATOR (20 SEC LIMIT) ---
   const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
         const file = e.target.files[0];
@@ -131,31 +120,61 @@ const StaffDashboard: React.FC = () => {
             return;
         }
 
-        // 100MB Hard Limit for browser safety
-        if (file.size > 100 * 1024 * 1024) {
-             alert("Video is too large (Max 100MB). Please record a shorter clip.");
-             return;
-        }
+        setIsValidatingVideo(true);
 
-        const reader = new FileReader();
-        reader.onload = () => {
-             // For video, we only allow 1 file
-             if (reader.result) {
-                setImages([reader.result as string]);
-             }
-        };
-        reader.onerror = () => {
-            alert("Failed to read video file.");
-        };
-        reader.readAsDataURL(file);
+        try {
+            // Check Duration
+            const duration = await new Promise<number>((resolve, reject) => {
+                const video = document.createElement('video');
+                video.preload = 'metadata';
+                video.onloadedmetadata = () => {
+                    window.URL.revokeObjectURL(video.src);
+                    resolve(video.duration);
+                };
+                video.onerror = () => reject("Invalid video file");
+                video.src = URL.createObjectURL(file);
+            });
+
+            if (duration > 20.5) { // 20.5 to give a tiny margin of error
+                alert(`Video is too long (${Math.round(duration)}s). Please strictly limit to 20 seconds.`);
+                setIsValidatingVideo(false);
+                // Clear input
+                e.target.value = '';
+                return;
+            }
+
+            // 100MB Hard Limit safety check (20s shouldn't reach this, but safety first)
+            if (file.size > 100 * 1024 * 1024) {
+                 alert("Video file size is too large despite short duration.");
+                 setIsValidatingVideo(false);
+                 return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                 if (reader.result) {
+                    setImages([reader.result as string]);
+                 }
+                 setIsValidatingVideo(false);
+            };
+            reader.onerror = () => {
+                alert("Failed to read video file.");
+                setIsValidatingVideo(false);
+            };
+            reader.readAsDataURL(file);
+
+        } catch (err) {
+            console.error(err);
+            alert("Could not validate video duration. Please try again.");
+            setIsValidatingVideo(false);
+        }
     }
   };
 
-  // --- COLLAGE ENGINE (UPDATED: SMART FIT) ---
+  // --- COLLAGE ENGINE ---
   const generateCollage = async (imageUrls: string[]): Promise<string> => {
     if (imageUrls.length <= 1) return imageUrls[0];
 
-    // Load all images
     const loadedImages = await Promise.all(
       imageUrls.map(src => new Promise<HTMLImageElement>((resolve, reject) => {
         const img = new Image();
@@ -165,39 +184,29 @@ const StaffDashboard: React.FC = () => {
       }))
     );
 
-    // Create a fixed 1:1 Square Canvas (1200x1200)
-    // This ensures the image looks "Big" in WhatsApp preview
     const size = 1200;
     const canvas = document.createElement('canvas');
     canvas.width = size;
     canvas.height = size;
     const ctx = canvas.getContext('2d');
-
     if (!ctx) throw new Error("Canvas context failed");
 
-    // Fill white background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, size, size);
 
     const count = loadedImages.length;
-    const gap = 8; // white gap size
+    const gap = 8; 
 
-    // --- SMART DRAW HELPER ---
-    // This draws the image fully contained (letterboxed) so NO NUMBERS are cut off.
-    // It fills the empty space with a blurred version of the same image for a pro look.
     const drawSmart = (img: HTMLImageElement, x: number, y: number, w: number, h: number) => {
         ctx.save();
         ctx.beginPath();
         ctx.rect(x, y, w, h);
         ctx.clip();
 
-        // 1. Background: Blurred & Zoomed version of image
-        // We draw it covering the area to serve as a nice backdrop
         const imgRatio = img.width / img.height;
         const targetRatio = w / h;
         let bx, by, bw, bh;
         
-        // Logic for 'cover' scaling for the blur background
         if (targetRatio > imgRatio) {
             bw = w;
             bh = w / imgRatio;
@@ -210,58 +219,43 @@ const StaffDashboard: React.FC = () => {
             bx = x + (w - bw) / 2;
         }
         
-        ctx.filter = 'blur(40px) brightness(0.6)'; // Heavy blur + Darken
-        ctx.drawImage(img, bx - 10, by - 10, bw + 20, bh + 20); // slightly larger to avoid edge artifacts
+        ctx.filter = 'blur(40px) brightness(0.6)'; 
+        ctx.drawImage(img, bx - 10, by - 10, bw + 20, bh + 20); 
         ctx.filter = 'none';
 
-        // 2. Foreground: Contained image (Show Perfectly)
         let fx, fy, fw, fh;
         if (targetRatio > imgRatio) {
-             // Slot is wider than image -> Fit to Height
              fh = h;
              fw = h * imgRatio;
              fx = x + (w - fw) / 2;
              fy = y;
         } else {
-             // Slot is taller than image -> Fit to Width
              fw = w;
              fh = w / imgRatio;
              fx = x;
              fy = y + (h - fh) / 2;
         }
         
-        // Add a nice shadow to lift the image off the blur
         ctx.shadowColor = 'rgba(0,0,0,0.5)';
         ctx.shadowBlur = 20;
         ctx.shadowOffsetX = 0;
         ctx.shadowOffsetY = 10;
         
         ctx.drawImage(img, fx, fy, fw, fh);
-        
         ctx.restore();
     };
 
     if (count === 2) {
-        // 2 Images: Split Vertically (Top and Bottom)
         const h = (size - gap) / 2;
         drawSmart(loadedImages[0], 0, 0, size, h);
         drawSmart(loadedImages[1], 0, h + gap, size, h);
     } else if (count === 3) {
-        // 3 Images: 1 Large Top, 2 Small Bottom
-        // Perfect for: Main Vitals (BP) on top, others (SpO2/Temp) below
         const halfH = (size - gap) / 2;
         const halfW = (size - gap) / 2;
-        
-        // Top Full Width (Image 1)
         drawSmart(loadedImages[0], 0, 0, size, halfH);
-        
-        // Bottom Left (Image 2)
         drawSmart(loadedImages[1], 0, halfH + gap, halfW, halfH);
-        
-        // Bottom Right (Image 3)
         drawSmart(loadedImages[2], halfW + gap, halfH + gap, halfW, halfH);
     } else {
-        // 4+ Images: 2x2 Grid
         const half = (size - gap) / 2;
         drawSmart(loadedImages[0], 0, 0, half, half);
         drawSmart(loadedImages[1], half + gap, 0, half, half);
@@ -269,7 +263,6 @@ const StaffDashboard: React.FC = () => {
         drawSmart(loadedImages[3], half + gap, half + gap, half, half);
     }
 
-    // High quality export
     return canvas.toDataURL('image/jpeg', 0.9);
   };
 
@@ -282,7 +275,6 @@ const StaffDashboard: React.FC = () => {
     const resident = residents.find(r => r.id === selectedResidentId);
     
     try {
-        // Run AI generation and Image Processing in PARALLEL to save time
         const aiPromise = GeminiService.generateMessage(
             resident?.name || 'Resident',
             category,
@@ -291,7 +283,6 @@ const StaffDashboard: React.FC = () => {
 
         let imagePromise: Promise<string[]> = Promise.resolve(images);
         
-        // Only collage if Vitals and > 1 image (Video is skipped)
         if (category === UpdateCategory.VITALS && images.length > 1) {
             imagePromise = generateCollage(images).then(collage => [collage]).catch(e => {
                 console.error("Collage failed, sending individual", e);
@@ -299,13 +290,12 @@ const StaffDashboard: React.FC = () => {
             });
         }
 
-        // Wait for both to finish
         const [aiMessage, finalImages] = await Promise.all([aiPromise, imagePromise]);
 
         await DB.createLog({
             residentId: selectedResidentId,
             residentName: resident?.name || 'Unknown',
-            staffName: 'Jane Doe', // Hardcoded for demo
+            staffName: 'Jane Doe', 
             category: category,
             notes: notes,
             imageUrls: finalImages,
@@ -333,104 +323,15 @@ const StaffDashboard: React.FC = () => {
     }
   };
 
-  // Define categories with Dark Mode specific styles (bg-opacity for glowing effect)
   const categories = [
-    { 
-        id: UpdateCategory.BREAKFAST, 
-        icon: <Coffee className="w-8 h-8" />, 
-        label: 'Breakfast', 
-        bg: 'bg-amber-100', 
-        text: 'text-amber-600', 
-        border: 'border-amber-200', 
-        ring: 'focus:ring-amber-400',
-        darkBg: 'dark:bg-amber-900/30',
-        darkText: 'dark:text-amber-400',
-        darkBorder: 'dark:border-amber-800'
-    },
-    { 
-        id: UpdateCategory.LUNCH, 
-        icon: <Sun className="w-8 h-8" />, 
-        label: 'Lunch', 
-        bg: 'bg-orange-100', 
-        text: 'text-orange-600', 
-        border: 'border-orange-200', 
-        ring: 'focus:ring-orange-400',
-        darkBg: 'dark:bg-orange-900/30',
-        darkText: 'dark:text-orange-400',
-        darkBorder: 'dark:border-orange-800'
-    },
-    { 
-        id: UpdateCategory.TEA_TIME, 
-        icon: <Coffee className="w-8 h-8" />, 
-        label: 'Tea Time', 
-        bg: 'bg-teal-100', 
-        text: 'text-teal-600', 
-        border: 'border-teal-200', 
-        ring: 'focus:ring-teal-400',
-        darkBg: 'dark:bg-teal-900/30',
-        darkText: 'dark:text-teal-400',
-        darkBorder: 'dark:border-teal-800'
-    },
-    { 
-        id: UpdateCategory.DINNER, 
-        icon: <Moon className="w-8 h-8" />, 
-        label: 'Dinner', 
-        bg: 'bg-indigo-100', 
-        text: 'text-indigo-600', 
-        border: 'border-indigo-200', 
-        ring: 'focus:ring-indigo-400',
-        darkBg: 'dark:bg-indigo-900/30',
-        darkText: 'dark:text-indigo-400',
-        darkBorder: 'dark:border-indigo-800'
-    },
-    { 
-        id: UpdateCategory.VITALS, 
-        icon: <HeartPulse className="w-8 h-8" />, 
-        label: 'Vitals', 
-        bg: 'bg-rose-100', 
-        text: 'text-rose-600', 
-        border: 'border-rose-200', 
-        ring: 'focus:ring-rose-400',
-        darkBg: 'dark:bg-rose-900/30',
-        darkText: 'dark:text-rose-400',
-        darkBorder: 'dark:border-rose-800'
-    },
-    { 
-        id: UpdateCategory.GLUCOSE, 
-        icon: <Thermometer className="w-8 h-8" />, 
-        label: 'Glucose', 
-        bg: 'bg-blue-100', 
-        text: 'text-blue-600', 
-        border: 'border-blue-200', 
-        ring: 'focus:ring-blue-400',
-        darkBg: 'dark:bg-blue-900/30',
-        darkText: 'dark:text-blue-400',
-        darkBorder: 'dark:border-blue-800'
-    },
-    { 
-        id: UpdateCategory.GENERAL, 
-        icon: <Smile className="w-8 h-8" />, 
-        label: 'General', 
-        bg: 'bg-emerald-100', 
-        text: 'text-emerald-600', 
-        border: 'border-emerald-200', 
-        ring: 'focus:ring-emerald-400',
-        darkBg: 'dark:bg-emerald-900/30',
-        darkText: 'dark:text-emerald-400',
-        darkBorder: 'dark:border-emerald-800'
-    },
-    { 
-        id: UpdateCategory.VIDEO, 
-        icon: <Video className="w-8 h-8" />, 
-        label: 'Video', 
-        bg: 'bg-violet-100', 
-        text: 'text-violet-600', 
-        border: 'border-violet-200', 
-        ring: 'focus:ring-violet-400',
-        darkBg: 'dark:bg-violet-900/30',
-        darkText: 'dark:text-violet-400',
-        darkBorder: 'dark:border-violet-800'
-    },
+    { id: UpdateCategory.BREAKFAST, icon: <Coffee className="w-8 h-8" />, label: 'Breakfast', bg: 'bg-amber-100', text: 'text-amber-600', border: 'border-amber-200', ring: 'focus:ring-amber-400', darkBg: 'dark:bg-amber-900/30', darkText: 'dark:text-amber-400', darkBorder: 'dark:border-amber-800' },
+    { id: UpdateCategory.LUNCH, icon: <Sun className="w-8 h-8" />, label: 'Lunch', bg: 'bg-orange-100', text: 'text-orange-600', border: 'border-orange-200', ring: 'focus:ring-orange-400', darkBg: 'dark:bg-orange-900/30', darkText: 'dark:text-orange-400', darkBorder: 'dark:border-orange-800' },
+    { id: UpdateCategory.TEA_TIME, icon: <Coffee className="w-8 h-8" />, label: 'Tea Time', bg: 'bg-teal-100', text: 'text-teal-600', border: 'border-teal-200', ring: 'focus:ring-teal-400', darkBg: 'dark:bg-teal-900/30', darkText: 'dark:text-teal-400', darkBorder: 'dark:border-teal-800' },
+    { id: UpdateCategory.DINNER, icon: <Moon className="w-8 h-8" />, label: 'Dinner', bg: 'bg-indigo-100', text: 'text-indigo-600', border: 'border-indigo-200', ring: 'focus:ring-indigo-400', darkBg: 'dark:bg-indigo-900/30', darkText: 'dark:text-indigo-400', darkBorder: 'dark:border-indigo-800' },
+    { id: UpdateCategory.VITALS, icon: <HeartPulse className="w-8 h-8" />, label: 'Vitals', bg: 'bg-rose-100', text: 'text-rose-600', border: 'border-rose-200', ring: 'focus:ring-rose-400', darkBg: 'dark:bg-rose-900/30', darkText: 'dark:text-rose-400', darkBorder: 'dark:border-rose-800' },
+    { id: UpdateCategory.GLUCOSE, icon: <Thermometer className="w-8 h-8" />, label: 'Glucose', bg: 'bg-blue-100', text: 'text-blue-600', border: 'border-blue-200', ring: 'focus:ring-blue-400', darkBg: 'dark:bg-blue-900/30', darkText: 'dark:text-blue-400', darkBorder: 'dark:border-blue-800' },
+    { id: UpdateCategory.GENERAL, icon: <Smile className="w-8 h-8" />, label: 'General', bg: 'bg-emerald-100', text: 'text-emerald-600', border: 'border-emerald-200', ring: 'focus:ring-emerald-400', darkBg: 'dark:bg-emerald-900/30', darkText: 'dark:text-emerald-400', darkBorder: 'dark:border-emerald-800' },
+    { id: UpdateCategory.VIDEO, icon: <Video className="w-8 h-8" />, label: 'Video', bg: 'bg-violet-100', text: 'text-violet-600', border: 'border-violet-200', ring: 'focus:ring-violet-400', darkBg: 'dark:bg-violet-900/30', darkText: 'dark:text-violet-400', darkBorder: 'dark:border-violet-800' },
   ];
 
   const selectedResident = residents.find(r => r.id === selectedResidentId);
@@ -514,7 +415,6 @@ const StaffDashboard: React.FC = () => {
 
       {selectedResidentId && (
         <>
-          {/* Category Grid */}
           <section className="animate-fade-in-up">
             <label className="block text-sm font-bold text-slate-400 uppercase tracking-wider mb-4 ml-2">What's happening?</label>
             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
@@ -523,7 +423,7 @@ const StaffDashboard: React.FC = () => {
                   key={cat.id}
                   onClick={() => {
                       setCategory(cat.id);
-                      setImages([]); // Clear previous images when switching categories
+                      setImages([]); 
                   }}
                   className={`relative group p-4 rounded-3xl border transition-all duration-300 flex flex-col items-center justify-center gap-3 hover:-translate-y-1 hover:shadow-lg ${
                     category === cat.id 
@@ -540,7 +440,6 @@ const StaffDashboard: React.FC = () => {
                       {cat.label}
                   </span>
                   
-                  {/* Active Indicator */}
                   {category === cat.id && (
                     <div className="absolute -top-2 -right-2 bg-brand-500 text-white p-1 rounded-full shadow-sm">
                         <CheckCircle className="w-4 h-4" />
@@ -553,7 +452,6 @@ const StaffDashboard: React.FC = () => {
 
           {category && activeCategoryDef && (
             <div ref={formRef} className="bg-white dark:bg-slate-800 rounded-[2rem] shadow-xl shadow-slate-200/60 dark:shadow-none border border-slate-100 dark:border-slate-700 overflow-hidden animate-fade-in-up transition-colors">
-               {/* Form Header */}
                <div className="bg-slate-50/80 dark:bg-slate-900/50 p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
                   <div className="flex items-center space-x-3">
                      <div className={`p-2 rounded-lg ${activeCategoryDef.bg} ${activeCategoryDef.darkBg} ${activeCategoryDef.text} ${activeCategoryDef.darkText}`}>
@@ -567,7 +465,6 @@ const StaffDashboard: React.FC = () => {
                </div>
 
                <div className="p-6 space-y-8">
-                  {/* Media Upload */}
                   <div className="space-y-4">
                     <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                         <span>Capture the Moment</span>
@@ -580,13 +477,12 @@ const StaffDashboard: React.FC = () => {
                         {category === UpdateCategory.VIDEO && (
                             <span className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded-full flex items-center gap-1 font-bold animate-pulse">
                                 <Video className="w-3 h-3" />
-                                Max 5 min retention
+                                Max 20 sec (Auto-delete)
                             </span>
                         )}
                     </label>
                     
                     <div className="flex flex-wrap gap-4">
-                      {/* PREVIEWS */}
                       {images.map((mediaUrl, idx) => (
                         <div key={idx} className={`relative rounded-2xl overflow-hidden border-4 border-white dark:border-slate-700 shadow-md ${category === UpdateCategory.VIDEO ? 'w-full aspect-video' : 'w-28 h-28 rotate-1 hover:rotate-0 transition-transform'}`}>
                           {category === UpdateCategory.VIDEO ? (
@@ -603,37 +499,47 @@ const StaffDashboard: React.FC = () => {
                         </div>
                       ))}
 
-                      {/* BUTTONS */}
                       {(category === UpdateCategory.VIDEO ? images.length < 1 : images.length < (category === UpdateCategory.VITALS ? 3 : 10)) && (
                         <div className="flex gap-3 w-full sm:w-auto">
                             {category === UpdateCategory.VIDEO ? (
                                 <>
-                                 {/* VIDEO BUTTONS */}
-                                 <label className="flex-1 sm:w-40 h-32 flex flex-col items-center justify-center border-2 border-dashed border-red-300 dark:border-red-700 bg-red-50/50 dark:bg-red-900/10 text-red-600 dark:text-red-400 rounded-2xl cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/20 hover:border-red-400 transition-all group">
+                                 <label className="flex-1 sm:w-40 h-32 flex flex-col items-center justify-center border-2 border-dashed border-red-300 dark:border-red-700 bg-red-50/50 dark:bg-red-900/10 text-red-600 dark:text-red-400 rounded-2xl cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/20 hover:border-red-400 transition-all group relative overflow-hidden">
+                                    {isValidatingVideo ? (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/50 dark:bg-black/50 z-10">
+                                            <Loader2 className="w-8 h-8 animate-spin text-red-500" />
+                                            <span className="text-xs font-bold mt-2">Checking...</span>
+                                        </div>
+                                    ) : null}
                                     <Video className="w-10 h-10 mb-2 group-hover:scale-110 transition-transform" />
-                                    <span className="text-xs font-bold">Record Video</span>
+                                    <span className="text-xs font-bold">Record Video (20s)</span>
                                     <input 
                                         type="file" 
                                         accept="video/*" 
                                         capture="environment" 
                                         className="hidden" 
                                         onChange={handleVideoUpload}
+                                        disabled={isValidatingVideo}
                                     />
                                 </label>
-                                <label className="flex-1 sm:w-40 h-32 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 text-slate-400 dark:text-slate-500 rounded-2xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-400 transition-all group">
+                                <label className="flex-1 sm:w-40 h-32 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 text-slate-400 dark:text-slate-500 rounded-2xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-400 transition-all group relative overflow-hidden">
+                                    {isValidatingVideo ? (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-white/50 dark:bg-black/50 z-10">
+                                            <Loader2 className="w-8 h-8 animate-spin text-slate-500" />
+                                        </div>
+                                    ) : null}
                                     <Upload className="w-10 h-10 mb-2 group-hover:scale-110 transition-transform" />
-                                    <span className="text-xs font-bold">Upload Video</span>
+                                    <span className="text-xs font-bold">Upload Video (20s)</span>
                                     <input 
                                         type="file" 
                                         accept="video/*" 
                                         className="hidden" 
                                         onChange={handleVideoUpload}
+                                        disabled={isValidatingVideo}
                                     />
                                 </label>
                                 </>
                             ) : (
                                 <>
-                                {/* IMAGE BUTTONS */}
                                 <label className="w-28 h-28 flex flex-col items-center justify-center border-2 border-dashed border-brand-300 dark:border-brand-700 bg-brand-50/50 dark:bg-brand-900/10 text-brand-600 dark:text-brand-400 rounded-2xl cursor-pointer hover:bg-brand-100 dark:hover:bg-brand-900/20 hover:border-brand-400 transition-all group">
                                     <Camera className="w-8 h-8 mb-1 group-hover:scale-110 transition-transform" />
                                     <span className="text-xs font-bold">Camera</span>
@@ -662,7 +568,6 @@ const StaffDashboard: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Notes */}
                   <div className="space-y-4">
                     <label className="block text-sm font-bold text-slate-700 dark:text-slate-300">Add a Note (Optional)</label>
                     <div className="relative group">
@@ -679,13 +584,12 @@ const StaffDashboard: React.FC = () => {
                   </div>
                </div>
 
-               {/* Action Bar */}
                <div className="p-6 pt-0">
                 <button
                   onClick={handleSubmit}
-                  disabled={isSubmitting}
+                  disabled={isSubmitting || isValidatingVideo}
                   className={`w-full py-4 px-6 rounded-2xl text-white font-bold text-lg shadow-lg shadow-brand-200 dark:shadow-none flex items-center justify-center space-x-3 transition-all transform active:scale-95 ${
-                    isSubmitting ? 'bg-slate-300 dark:bg-slate-600 cursor-not-allowed shadow-none' : 'bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-700 hover:to-brand-600'
+                    isSubmitting || isValidatingVideo ? 'bg-slate-300 dark:bg-slate-600 cursor-not-allowed shadow-none' : 'bg-gradient-to-r from-brand-600 to-brand-500 hover:from-brand-700 hover:to-brand-600'
                   }`}
                 >
                   {isSubmitting ? (

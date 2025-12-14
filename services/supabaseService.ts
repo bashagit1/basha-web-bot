@@ -7,7 +7,6 @@ import { BotStatusResponse } from './database';
 // DYNAMIC URL DETECTION
 const getBotServerUrl = () => {
     // 1. LocalStorage Override (Dynamic Access for Mobile)
-    // This allows the user to paste a new Ngrok URL in the UI without redeploying
     const localOverride = localStorage.getItem('custom_bot_url');
     if (localOverride) {
         console.log(`[Config] Using Local Storage URL: ${localOverride}`);
@@ -22,7 +21,6 @@ const getBotServerUrl = () => {
     }
 
     // 3. Hardcoded Static Domain (User Provided)
-    // If running on Netlify (Production) and no override is set, use this specific tunnel.
     if (window.location.hostname.includes('netlify.app')) {
         console.log('[Config] Detected Netlify. Using Static Ngrok Tunnel.');
         return 'https://cyclic-zena-viscous.ngrok-free.dev';
@@ -32,7 +30,7 @@ const getBotServerUrl = () => {
     
     // 4. If running on Localhost or Local IP, look for local bot
     if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.startsWith('192.168.')) {
-        return `http://${hostname}:3001`; // Port 3001 on the same machine
+        return `http://${hostname}:3001`; 
     }
     
     // 5. Default Fallback
@@ -42,7 +40,6 @@ const getBotServerUrl = () => {
 const BOT_SERVER_URL = getBotServerUrl();
 console.log(`[Config] Bot Server URL set to: ${BOT_SERVER_URL}`);
 
-// WARN USER IF USING NETLIFY WITHOUT OVERRIDE
 if (window.location.hostname.includes('netlify.app') && BOT_SERVER_URL.includes('localhost') && !localStorage.getItem('custom_bot_url')) {
     console.warn("NOTICE: You are on Netlify but the Bot URL is Localhost.");
     console.warn("If you are on mobile, go to Admin > WhatsApp Bot and paste your Ngrok URL.");
@@ -53,7 +50,6 @@ const SUPABASE_ANON_KEY = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'e
 
 // --- HELPER FUNCTIONS ---
 
-// Safe header normalization to handle plain objects, Headers instances, or Arrays
 const normalizeHeaders = (headersInit?: HeadersInit): Record<string, string> => {
     const headers: Record<string, string> = {};
     if (!headersInit) return headers;
@@ -72,16 +68,13 @@ const normalizeHeaders = (headersInit?: HeadersInit): Record<string, string> => 
     return headers;
 };
 
-// Helper function to retry fetches with Exponential Backoff
 async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 3, backoff = 1000): Promise<Response> {
     try {
-        // Fix: Properly merge headers preventing "No API key found" error if Supabase sends Headers object
         const mergedHeaders = normalizeHeaders(options.headers);
         mergedHeaders['ngrok-skip-browser-warning'] = 'true';
         
         const response = await fetch(url, { ...options, headers: mergedHeaders });
         
-        // Retry on Server Errors (5xx) or Timeouts (408, 429)
         if (!response.ok && (response.status === 408 || response.status === 429 || response.status >= 500)) {
             const msg = `Server Error: ${response.status} ${response.statusText}`;
             console.warn(`[Network] ${msg}. Retrying...`);
@@ -100,12 +93,10 @@ async function fetchWithRetry(url: string, options: RequestInit = {}, retries = 
     }
 }
 
-// Custom Fetch Wrapper for Supabase SDK to enable retries
 const supabaseFetch = (url: RequestInfo | URL, options?: RequestInit) => {
     return fetchWithRetry(url.toString(), options || {}, 5, 1000);
 }
 
-// Initialize Client with Global Retry Logic
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     auth: {
         persistSession: true,
@@ -117,8 +108,6 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
 });
 
 export const LiveDB = {
-  
-  // --- RESIDENTS ---
   
   getResidents: async (): Promise<Resident[]> => {
     const { data, error } = await supabase
@@ -213,45 +202,58 @@ export const LiveDB = {
 
   createLog: async (logData: Omit<ActivityLog, 'id' | 'timestamp' | 'status'>): Promise<ActivityLog> => {
     
-    // SIZE CHECK & PROTECTION
-    // Supabase REST API often rejects payloads > 6MB. 
-    // Video base64 strings can be 20MB+. 
-    // We check the size, and if it's too big, we DO NOT save the video to the DB (saving a placeholder instead)
-    // but we STILL send the video to WhatsApp.
-    const approximateSizeInBytes = JSON.stringify(logData.imageUrls).length * 0.75; // Approx Base64 size
-    const MAX_DB_SIZE_BYTES = 5 * 1024 * 1024; // 5MB Safe Limit
+    // NOTE: We trust the 20-second video limit from the frontend to keep payload sizes reasonable.
+    // We attempt to save to DB first so it appears in the gallery.
     
     let dbImageUrls = logData.imageUrls;
-    let isVideoTooLarge = false;
+    let newLog: any = null;
 
-    if (logData.category === 'Video Message' && approximateSizeInBytes > MAX_DB_SIZE_BYTES) {
-        console.warn(`[Log] Video is too large for Database History (${Math.round(approximateSizeInBytes/1024/1024)}MB). Saving placeholder to DB, but sending real video to WhatsApp.`);
-        dbImageUrls = []; // Clear images from DB payload
-        isVideoTooLarge = true;
+    try {
+        const { data, error } = await supabase
+        .from('activity_logs')
+        .insert([{
+            resident_id: logData.residentId,
+            resident_name: logData.residentName,
+            staff_name: logData.staffName,
+            category: logData.category,
+            notes: logData.notes,
+            image_urls: dbImageUrls, 
+            status: 'PENDING',
+            ai_generated_message: logData.aiGeneratedMessage
+        }])
+        .select()
+        .single();
+
+        if (error) throw error;
+        newLog = data;
+
+    } catch (dbError: any) {
+        // FALLBACK STRATEGY
+        // If the video was still too big for Supabase (Payload Too Large),
+        // we create the log WITHOUT the video data so at least the record exists,
+        // and then we try to send the video to WhatsApp anyway.
+        console.warn('DB Insert failed (likely size). Retrying without media payload for DB history.', dbError);
+        
+        const { data, error } = await supabase
+            .from('activity_logs')
+            .insert([{
+                resident_id: logData.residentId,
+                resident_name: logData.residentName,
+                staff_name: logData.staffName,
+                category: logData.category,
+                notes: logData.notes + ' [Video too large for history]',
+                image_urls: [], // Empty for DB
+                status: 'PENDING',
+                ai_generated_message: logData.aiGeneratedMessage
+            }])
+            .select()
+            .single();
+            
+        if (error) throw new Error("Database Error: " + error.message);
+        newLog = data;
     }
 
-    const { data, error } = await supabase
-      .from('activity_logs')
-      .insert([{
-        resident_id: logData.residentId,
-        resident_name: logData.residentName,
-        staff_name: logData.staffName,
-        category: logData.category,
-        notes: logData.notes,
-        image_urls: dbImageUrls, // Use safe payload
-        status: 'PENDING',
-        ai_generated_message: logData.aiGeneratedMessage
-      }])
-      .select()
-      .single();
-
-    if (error) {
-      console.error('Supabase Error creating log:', error);
-      throw new Error("Database Error: " + error.message);
-    }
-
-    const newLog = data;
-    
+    // --- WHATSAPP SENDING ---
     const { data: residentData } = await supabase
         .from('residents')
         .select('whatsapp_group_id')
@@ -259,7 +261,6 @@ export const LiveDB = {
         .single();
         
     const residentGroupId = residentData?.whatsapp_group_id;
-
     let finalStatus = 'PENDING';
     
     const hasMessage = logData.aiGeneratedMessage && logData.aiGeneratedMessage.trim() !== '';
@@ -269,48 +270,36 @@ export const LiveDB = {
       try {
         console.log(`Attempting to send update to: ${BOT_SERVER_URL}`);
         
-        // Use the FULL logData.imageUrls (containing the real video) for the Bot, even if we skipped DB
+        // Always send the FULL `logData.imageUrls` to the bot, 
+        // even if we had to strip it from the DB.
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             groupId: residentGroupId,
             message: logData.aiGeneratedMessage || '', 
-            imageUrls: logData.imageUrls // Send REAL data to WhatsApp
+            imageUrls: logData.imageUrls 
           })
-        }, 3, 3000); // 3 retries, 3s backoff (Video upload needs patience)
+        }, 3, 3000); 
 
         if (response.ok) {
             finalStatus = 'SENT';
         } else {
             console.warn(`Bot server responded with ${response.status}: ${response.statusText}`);
-            if (response.status === 413) {
-                 console.error("CRITICAL: Payload too large for Bot Server. Check image resizing.");
-            }
             finalStatus = 'FAILED';
         }
       } catch (err: any) {
         console.warn(`Bot server unreachable at ${BOT_SERVER_URL}`, err);
-        if (err.message && (err.message.includes('Failed to fetch') || err.message.includes('Server Error'))) {
-             console.error(`CRITICAL: Backend Server at ${BOT_SERVER_URL} is offline or unreachable.`);
-        }
         finalStatus = 'FAILED';
       }
     } else if (residentGroupId) {
          finalStatus = 'SENT'; 
     }
 
-    // Update status. If we skipped saving video to DB, we append a note.
-    const statusUpdate = { status: finalStatus };
-    if (isVideoTooLarge && finalStatus === 'SENT') {
-        // Optional: Mark it so we know why it's empty in history
-        // But schema strictness might prevent adding fields. We just stick to status.
-    }
-
     if (finalStatus !== 'PENDING') {
         await supabase
             .from('activity_logs')
-            .update(statusUpdate)
+            .update({ status: finalStatus })
             .eq('id', newLog.id);
     }
 
@@ -345,7 +334,7 @@ export const LiveDB = {
             message: log.aiGeneratedMessage || '',
             imageUrls: log.imageUrls
             })
-        }, 5, 2000); // Also increased patience for retries
+        }, 5, 2000);
 
         if (!response.ok) {
             throw new Error("Retry failed. Bot rejected the request.");
@@ -416,7 +405,7 @@ export const LiveDB = {
     try {
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/groups`, {
             method: 'GET'
-        }, 3, 1500); // Increased patience for group scanning too
+        }, 3, 1500); 
         
         if (!response.ok) {
             const errorText = await response.text();

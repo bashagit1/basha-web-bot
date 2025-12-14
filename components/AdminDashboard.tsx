@@ -33,7 +33,8 @@ import {
   Camera,
   Pencil,
   Globe,
-  Save
+  Save,
+  Video
 } from 'lucide-react';
 
 const AdminDashboard: React.FC = () => {
@@ -83,10 +84,8 @@ const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     refreshData();
-    // Force a fresh scan of groups on mount to ensure the dropdown is populated
     handleScanGroups(true); 
     startBotPolling();
-    // Load custom url if exists
     const stored = localStorage.getItem('custom_bot_url');
     if (stored) setCustomUrl(stored);
 
@@ -96,7 +95,7 @@ const AdminDashboard: React.FC = () => {
   const startBotPolling = () => {
     checkBot();
     if (pollInterval.current) clearInterval(pollInterval.current);
-    pollInterval.current = setInterval(checkBot, 10000); // Polling increased to 10s to prevent server overload
+    pollInterval.current = setInterval(checkBot, 10000); 
   };
 
   const stopBotPolling = () => {
@@ -130,16 +129,11 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  const loadGroupsSilently = async () => {
-      // Replaced by automatic handleScanGroups(true)
-  };
-
   const openAddModal = () => {
     setIsEditing(false);
     setNewResident({});
     setCurrentResidentId(null);
     setShowAddModal(true);
-    // Refresh groups when modal opens
     handleScanGroups(true);
   };
 
@@ -182,7 +176,7 @@ const AdminDashboard: React.FC = () => {
         refreshData();
     } catch (err: any) {
         setError(err.message || "Failed to delete resident");
-        setResidentToDelete(null); // Close modal even on error to show the error message on dashboard
+        setResidentToDelete(null);
     } finally {
         setIsDeleting(false);
     }
@@ -192,7 +186,7 @@ const AdminDashboard: React.FC = () => {
       setRetryingLogId(log.id);
       try {
           await DB.retryLog(log);
-          refreshData(); // Refresh to see updated status
+          refreshData(); 
       } catch (err: any) {
           alert("Retry failed: " + err.message);
       } finally {
@@ -230,7 +224,6 @@ const AdminDashboard: React.FC = () => {
 
   const handleSaveCustomUrl = () => {
     setIsSavingUrl(true);
-    // basic cleanup
     let url = customUrl.trim();
     if (url.endsWith('/')) url = url.slice(0, -1);
     
@@ -240,7 +233,6 @@ const AdminDashboard: React.FC = () => {
         localStorage.setItem('custom_bot_url', url);
     }
     
-    // Slight delay to show feedback then reload
     setTimeout(() => {
         setIsSavingUrl(false);
         window.location.reload();
@@ -277,40 +269,40 @@ const AdminDashboard: React.FC = () => {
         const a = document.createElement('a');
         a.style.display = 'none';
         a.href = url;
-        // Filename: ResidentName_Category_Date.jpg
+        // Filename: ResidentName_Category_Date.jpg or .mp4
         const dateStr = new Date(img.date).toISOString().split('T')[0];
-        a.download = `${img.resident.replace(/\s+/g, '_')}_${img.category}_${dateStr}.jpg`;
+        const ext = img.isVideo ? 'mp4' : 'jpg';
+        a.download = `${img.resident.replace(/\s+/g, '_')}_${img.category}_${dateStr}.${ext}`;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
     } catch (err) {
         console.error("Download failed", err);
-        alert("Failed to download image. Try again.");
+        alert("Failed to download file. Try again.");
     }
   };
 
   const handleDeleteSingleImage = async () => {
       if(!selectedImage) return;
-      if(!confirm("Are you sure you want to delete this photo? This cannot be undone.")) return;
+      if(!confirm("Are you sure you want to delete this? This cannot be undone.")) return;
 
       try {
           await DB.deleteImageFromLog(selectedImage.logId, selectedImage.url);
-          setSelectedImage(null); // Close modal
-          refreshData(); // Reload grid
+          setSelectedImage(null); 
+          refreshData(); 
       } catch(err: any) {
-          alert("Failed to delete image: " + err.message);
+          alert("Failed to delete: " + err.message);
       }
   };
 
   const handleBulkDelete = async (allImages: any[]) => {
       if (selectedImageIds.size === 0) return;
-      if (!confirm(`Are you sure you want to delete ${selectedImageIds.size} images? This cannot be undone.`)) return;
+      if (!confirm(`Are you sure you want to delete ${selectedImageIds.size} items? This cannot be undone.`)) return;
 
       setIsDeletingImages(true);
       try {
           const imagesToDelete = allImages.filter(img => selectedImageIds.has(img.id));
           
-          // Delete sequentially to avoid race conditions on the same log row
           for (const img of imagesToDelete) {
              await DB.deleteImageFromLog(img.logId, img.url);
           }
@@ -319,7 +311,7 @@ const AdminDashboard: React.FC = () => {
           setSelectedImageIds(new Set());
           refreshData();
       } catch (err: any) {
-          alert("Some images could not be deleted: " + err.message);
+          alert("Some items could not be deleted: " + err.message);
       } finally {
           setIsDeletingImages(false);
       }
@@ -335,17 +327,16 @@ const AdminDashboard: React.FC = () => {
         
         const imagesToDownload = allImages.filter(img => selectedImageIds.has(img.id));
         
-        // Fetch all images in parallel
         await Promise.all(imagesToDownload.map(async (img) => {
             try {
                 const response = await fetch(img.url);
                 const blob = await response.blob();
                 const dateStr = new Date(img.date).toISOString().split('T')[0];
-                // Provide unique names to prevent overwrite
-                const filename = `${img.resident.replace(/\s+/g, '_')}_${img.category}_${dateStr}_${img.id.split('-')[1]}.jpg`;
+                const ext = img.isVideo ? 'mp4' : 'jpg';
+                const filename = `${img.resident.replace(/\s+/g, '_')}_${img.category}_${dateStr}_${img.id.split('-')[1]}.${ext}`;
                 folder?.file(filename, blob);
             } catch (e) {
-                console.warn(`Failed to fetch image for zip: ${img.id}`);
+                console.warn(`Failed to fetch file for zip: ${img.id}`);
             }
         }));
 
@@ -359,7 +350,6 @@ const AdminDashboard: React.FC = () => {
         a.click();
         window.URL.revokeObjectURL(url);
 
-        // Cleanup
         setIsSelectionMode(false);
         setSelectedImageIds(new Set());
 
@@ -371,7 +361,10 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  // --- Sub Components ---
+  // --- HELPER: DETECT VIDEO ---
+  const isVideoUrl = (url: string) => {
+      return url.startsWith('data:video') || url.endsWith('.mp4');
+  };
 
   const StatCard = ({ title, value, icon, color, darkColor }: any) => (
     <div className="bg-white dark:bg-slate-800 p-6 rounded-3xl shadow-sm border border-slate-100 dark:border-slate-700 flex items-center justify-between transition-colors">
@@ -387,7 +380,6 @@ const AdminDashboard: React.FC = () => {
 
   const renderResidentsTab = () => (
     <div className="space-y-8 animate-fade-in">
-      {/* Stats Row */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <StatCard 
             title="Total Residents" 
@@ -412,7 +404,6 @@ const AdminDashboard: React.FC = () => {
         />
       </div>
 
-      {/* Main Content */}
       <div className="bg-white dark:bg-slate-800 rounded-[2rem] border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden transition-colors">
         <div className="p-6 border-b border-slate-100 dark:border-slate-700 flex justify-between items-center">
           <h2 className="text-lg font-bold text-slate-800 dark:text-white">Resident Directory</h2>
@@ -455,7 +446,6 @@ const AdminDashboard: React.FC = () => {
                        <span className="text-xs font-mono text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 px-2 py-1 rounded">{r.whatsappGroupId || 'Not Connected'}</span>
                     </div>
                     <div className="flex items-center space-x-2">
-                        {/* Edit Button */}
                         <button 
                             onClick={() => openEditModal(r)}
                             className="text-slate-400 hover:text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-900/20 p-2 rounded-lg transition-colors"
@@ -463,7 +453,6 @@ const AdminDashboard: React.FC = () => {
                         >
                             <Pencil className="w-5 h-5" />
                         </button>
-                        {/* Delete Button */}
                         <button 
                             onClick={() => setResidentToDelete(r)}
                             className="text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 p-2 rounded-lg transition-colors"
@@ -485,7 +474,6 @@ const AdminDashboard: React.FC = () => {
     <div className="max-w-4xl mx-auto space-y-8 animate-fade-in">
       <div className="bg-white dark:bg-slate-800 rounded-[2.5rem] shadow-xl shadow-slate-200/50 dark:shadow-none border border-slate-100 dark:border-slate-700 overflow-hidden transition-colors">
         <div className="bg-gradient-to-r from-slate-800 to-slate-900 p-10 text-white text-center relative overflow-hidden">
-            {/* Decorative circles */}
             <div className="absolute top-0 left-0 w-64 h-64 bg-white opacity-5 rounded-full -translate-x-1/2 -translate-y-1/2 blur-3xl"></div>
             <div className="absolute bottom-0 right-0 w-64 h-64 bg-brand-500 opacity-10 rounded-full translate-x-1/2 translate-y-1/2 blur-3xl"></div>
             
@@ -511,7 +499,6 @@ const AdminDashboard: React.FC = () => {
         </div>
 
         <div className="p-10">
-             {/* QR Code Display */}
             {botStatus === 'disconnected' && (
             <div className="flex flex-col items-center">
                 {qrCodeData ? (
@@ -552,7 +539,6 @@ const AdminDashboard: React.FC = () => {
                     </div>
                 </div>
 
-                {/* NEW: Remote Connection Settings */}
                 <div className="bg-blue-50 dark:bg-slate-700/50 border border-blue-100 dark:border-slate-600 p-6 rounded-2xl">
                     <div className="flex items-center space-x-2 mb-3">
                         <Globe className="w-5 h-5 text-blue-600 dark:text-blue-400" />
@@ -668,7 +654,6 @@ const AdminDashboard: React.FC = () => {
                    </div>
                 </div>
                 <div className="flex items-center gap-2">
-                    {/* Retry Button for Failed Logs */}
                     {log.status === 'FAILED' && (
                         <button 
                             onClick={() => handleRetryLog(log)}
@@ -716,7 +701,6 @@ const AdminDashboard: React.FC = () => {
   );
 
   const renderGalleryTab = () => {
-    // 1. Flatten all images from logs
     const galleryImages = logs.flatMap(log => 
         (log.imageUrls || []).map((url, idx) => ({
             id: `${log.id}-${idx}`,
@@ -726,11 +710,11 @@ const AdminDashboard: React.FC = () => {
             category: log.category,
             date: log.timestamp,
             notes: log.notes,
-            staff: log.staffName
+            staff: log.staffName,
+            isVideo: isVideoUrl(url)
         }))
     );
 
-    // 2. Filter logic
     const filteredImages = galleryImages.filter(img => {
         const matchesResident = galleryFilterResident === 'all' || img.resident === galleryFilterResident;
         const matchesCategory = galleryFilterCategory === 'all' || img.category === galleryFilterCategory;
@@ -739,7 +723,6 @@ const AdminDashboard: React.FC = () => {
 
     return (
         <div className="space-y-6 animate-fade-in relative">
-            {/* Gallery Controls */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-100 dark:border-slate-700 shadow-sm">
                 <div className="flex items-center space-x-4">
                     <div className="flex items-center space-x-2 text-slate-500 dark:text-slate-400">
@@ -788,17 +771,16 @@ const AdminDashboard: React.FC = () => {
                         <option value="Dinner">Dinner</option>
                         <option value="Vital Signs">Vitals</option>
                         <option value="General Update">General</option>
+                        <option value="Video Message">Video</option>
                     </select>
                 </div>
             </div>
 
-            {/* Bulk Action Bar (Floating) */}
             {isSelectionMode && selectedImageIds.size > 0 && (
                 <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl z-40 flex items-center space-x-4 animate-fade-in-up">
                     <span className="font-bold text-sm">{selectedImageIds.size} Selected</span>
                     <div className="h-4 w-px bg-slate-700"></div>
                     
-                    {/* Bulk Download */}
                     <button 
                         onClick={() => handleBulkDownload(filteredImages)}
                         disabled={isDownloading || isDeletingImages}
@@ -810,7 +792,6 @@ const AdminDashboard: React.FC = () => {
 
                      <div className="h-4 w-px bg-slate-700"></div>
 
-                     {/* Bulk Delete */}
                     <button 
                         onClick={() => handleBulkDelete(filteredImages)}
                         disabled={isDownloading || isDeletingImages}
@@ -822,13 +803,12 @@ const AdminDashboard: React.FC = () => {
                 </div>
             )}
 
-            {/* Gallery Grid */}
             {filteredImages.length === 0 ? (
                  <div className="text-center py-20 bg-white dark:bg-slate-800 rounded-3xl border border-slate-100 dark:border-slate-700 shadow-sm flex flex-col items-center">
                     <div className="w-20 h-20 bg-slate-50 dark:bg-slate-700 rounded-full flex items-center justify-center mb-4">
                         <ImageIcon className="w-8 h-8 text-slate-300 dark:text-slate-500" />
                     </div>
-                    <h3 className="text-lg font-bold text-slate-700 dark:text-slate-200">No photos found</h3>
+                    <h3 className="text-lg font-bold text-slate-700 dark:text-slate-200">No media found</h3>
                     <p className="text-slate-400 dark:text-slate-500">Try adjusting the filters or ask staff to upload some moments.</p>
                 </div>
             ) : (
@@ -848,14 +828,25 @@ const AdminDashboard: React.FC = () => {
                                 : 'border-slate-100 dark:border-slate-700 hover:-translate-y-1'
                             }`}
                         >
-                            <img 
-                                src={img.url} 
-                                alt={img.category} 
-                                className={`w-full h-full object-contain transition-transform duration-500 ${isSelected ? 'scale-95' : 'group-hover:scale-105'}`} 
-                                loading="lazy"
-                            />
+                            {img.isVideo ? (
+                                <video src={img.url} className="w-full h-full object-cover" />
+                            ) : (
+                                <img 
+                                    src={img.url} 
+                                    alt={img.category} 
+                                    className={`w-full h-full object-contain transition-transform duration-500 ${isSelected ? 'scale-95' : 'group-hover:scale-105'}`} 
+                                    loading="lazy"
+                                />
+                            )}
+
+                            {img.isVideo && (
+                                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                    <div className="w-12 h-12 bg-black/40 backdrop-blur-sm rounded-full flex items-center justify-center border border-white/30">
+                                        <div className="w-0 h-0 border-t-[8px] border-t-transparent border-l-[14px] border-l-white border-b-[8px] border-b-transparent ml-1"></div>
+                                    </div>
+                                </div>
+                            )}
                             
-                            {/* Selection Checkbox Overlay */}
                             {isSelectionMode && (
                                 <div className="absolute inset-0 bg-black/10 flex items-start justify-end p-3">
                                     <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-all ${
@@ -866,7 +857,6 @@ const AdminDashboard: React.FC = () => {
                                 </div>
                             )}
 
-                            {/* Info Overlay (Only when NOT selecting) */}
                             {!isSelectionMode && (
                                 <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-4">
                                     <p className="text-white font-bold text-sm truncate">{img.resident}</p>
@@ -877,7 +867,6 @@ const AdminDashboard: React.FC = () => {
                                 </div>
                             )}
                             
-                            {/* Date Badge */}
                             <div className="absolute top-2 left-2 bg-white/90 dark:bg-black/60 backdrop-blur-sm px-2 py-1 rounded-lg text-[10px] font-bold text-slate-600 dark:text-slate-300 shadow-sm pointer-events-none">
                                 {new Date(img.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                             </div>
@@ -886,12 +875,10 @@ const AdminDashboard: React.FC = () => {
                 </div>
             )}
 
-            {/* Lightbox Modal */}
             {selectedImage && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-sm animate-fade-in" onClick={() => setSelectedImage(null)}>
                     <div className="relative w-full max-w-5xl h-[80vh] flex flex-col md:flex-row bg-white dark:bg-slate-900 rounded-3xl overflow-hidden shadow-2xl" onClick={e => e.stopPropagation()}>
                         
-                        {/* Close Button */}
                         <button 
                             onClick={() => setSelectedImage(null)}
                             className="absolute top-4 right-4 z-50 p-2 bg-black/50 text-white rounded-full hover:bg-red-500 transition-colors"
@@ -899,36 +886,41 @@ const AdminDashboard: React.FC = () => {
                             <X className="w-5 h-5" />
                         </button>
 
-                        {/* Download Button */}
                         <button 
                             onClick={() => downloadSingleImage(selectedImage)}
                             className="absolute top-4 left-4 z-50 p-2 bg-black/50 text-white rounded-full hover:bg-brand-500 transition-colors flex items-center space-x-2 pr-4"
-                            title="Download Image"
+                            title="Download"
                         >
                             <Download className="w-5 h-5" />
                             <span className="text-xs font-bold">Save</span>
                         </button>
 
-                         {/* Delete Button (New) */}
                          <button 
                             onClick={handleDeleteSingleImage}
                             className="absolute bottom-4 right-4 md:right-auto md:left-4 z-50 p-2 bg-black/50 text-red-300 rounded-full hover:bg-red-600 hover:text-white transition-colors flex items-center space-x-2 pr-4"
-                            title="Delete Image"
+                            title="Delete"
                         >
                             <Trash2 className="w-5 h-5" />
                             <span className="text-xs font-bold">Delete</span>
                         </button>
 
-                        {/* Image Section */}
                         <div className="flex-1 bg-black flex items-center justify-center p-2 relative">
-                            <img 
-                                src={selectedImage.url} 
-                                alt="Full View" 
-                                className="max-w-full max-h-full object-contain rounded-lg" 
-                            />
+                            {selectedImage.isVideo ? (
+                                <video 
+                                    src={selectedImage.url} 
+                                    controls 
+                                    autoPlay 
+                                    className="max-w-full max-h-full rounded-lg outline-none" 
+                                />
+                            ) : (
+                                <img 
+                                    src={selectedImage.url} 
+                                    alt="Full View" 
+                                    className="max-w-full max-h-full object-contain rounded-lg" 
+                                />
+                            )}
                         </div>
 
-                        {/* Info Sidebar */}
                         <div className="w-full md:w-80 bg-white dark:bg-slate-900 border-l border-slate-100 dark:border-slate-800 p-6 flex flex-col overflow-y-auto">
                             <div className="mb-6">
                                 <span className="inline-block px-3 py-1 rounded-full bg-brand-50 dark:bg-brand-900/30 text-brand-600 dark:text-brand-400 text-xs font-bold mb-2 uppercase tracking-wider">
@@ -967,7 +959,6 @@ const AdminDashboard: React.FC = () => {
 
   return (
     <div className="max-w-6xl mx-auto p-4 md:p-8 pb-20">
-      {/* Header Section */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-10 gap-4">
         <div>
             <h1 className="text-4xl font-extrabold text-slate-800 dark:text-white tracking-tight">Admin Console</h1>
@@ -987,7 +978,6 @@ const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Navigation Pills */}
       <div className="flex justify-center mb-10">
          <div className="bg-white dark:bg-slate-800 p-1.5 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 inline-flex transition-colors flex-wrap justify-center">
             {[
@@ -1012,7 +1002,6 @@ const AdminDashboard: React.FC = () => {
          </div>
       </div>
 
-      {/* Content Area */}
       <div className="min-h-[400px]">
         {activeTab === 'residents' && renderResidentsTab()}
         {activeTab === 'whatsapp' && renderWhatsAppTab()}
@@ -1020,7 +1009,6 @@ const AdminDashboard: React.FC = () => {
         {activeTab === 'logs' && renderLogsTab()}
       </div>
 
-      {/* Add/Edit Resident Modal */}
       {showAddModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
           <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl max-w-md w-full p-8 border border-white/20 dark:border-slate-800 transform transition-all scale-100">
@@ -1029,7 +1017,6 @@ const AdminDashboard: React.FC = () => {
             </h3>
             <form onSubmit={handleSaveResident} className="space-y-5">
               
-              {/* Profile Picture Upload */}
               <div className="flex justify-center mb-6">
                 <div className="relative group">
                     <div className="w-28 h-28 rounded-full overflow-hidden border-4 border-slate-100 dark:border-slate-800 shadow-md bg-slate-50 dark:bg-slate-800 flex items-center justify-center">
@@ -1092,7 +1079,6 @@ const AdminDashboard: React.FC = () => {
                         )}
                     </select>
                     <Smartphone className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-                    {/* Add dropdown arrow icon if desired, or rely on browser default/appearance-none */}
                 </div>
                 {availableGroups.length === 0 && (
                     <p className="text-xs text-amber-500 mt-1 px-1">
@@ -1120,7 +1106,6 @@ const AdminDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
       {residentToDelete && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
             <div className="bg-white dark:bg-slate-900 rounded-[2rem] shadow-2xl max-w-sm w-full p-8 border border-white/20 dark:border-slate-800 transform transition-all scale-100 text-center">
