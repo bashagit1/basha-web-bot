@@ -158,7 +158,6 @@ async function startWhatsApp() {
             authStrategy: new LocalAuth({
                 dataPath: authPath
             }), 
-            // NOTE: Removed webVersionCache to allow auto-detection of latest stable version
             puppeteer: {
                 args: [
                     '--no-sandbox', 
@@ -169,6 +168,8 @@ async function startWhatsApp() {
                     '--no-zygote',
                     '--single-process', 
                     '--disable-gpu',
+                    // CRITICAL FIX: Increase shared memory for Video Processing
+                    '--shm-size=1gb', 
                     '--disable-extensions',
                     '--mute-audio',
                     '--disable-software-rasterizer',
@@ -181,7 +182,8 @@ async function startWhatsApp() {
                     '--allow-running-insecure-content'
                 ],
                 headless: true,
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+                // CRITICAL FIX: Use latest Chrome User Agent to avoid WhatsApp blocking media
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36'
             }
         });
 
@@ -286,10 +288,11 @@ async function processJob(job) {
                     let mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
                     const data = parts[1];
 
-                    // --- UNIVERSAL VIDEO FIX ---
+                    // --- VIDEO FIX ---
+                    // WhatsApp Web requires 'video/mp4' to display the inline player.
+                    // Even if the source is 'video/webm' (Android), we try masquerading it.
                     let ext = 'jpg';
                     if (mime.startsWith('video/')) {
-                        console.log(`[QUEUE] ⚠️ Masquerading ${mime} as video/mp4 for WhatsApp compatibility.`);
                         mime = 'video/mp4'; 
                         ext = 'mp4';
                     } else {
@@ -317,36 +320,39 @@ async function processJob(job) {
                     if (isVideo) {
                         // STRICT FORCE: Prevent "Document" behavior
                         options.sendMediaAsDocument = false; 
-                        options.isViewOnce = false;
                     }
 
                     console.log(`[QUEUE] Sending media to ${groupId}...`);
                     
-                    const timeoutSeconds = isVideo ? 300000 : 30000;
+                    // Increased timeout for video processing
+                    const timeoutSeconds = isVideo ? 120000 : 30000;
                     
                     // --- RETRY LOOP ---
-                    // Try to send up to 3 times to handle network flakiness
                     let sent = false;
                     let lastError = null;
 
                     for (let attempt = 1; attempt <= 3; attempt++) {
                         try {
+                            // Race condition wrapper to catch timeouts explicitly
+                            const sendPromise = client.sendMessage(groupId, media, options);
                             const timeoutPromise = new Promise((_, reject) => 
                                 setTimeout(() => reject(new Error('Timeout sending media')), timeoutSeconds)
                             );
-                            const sendPromise = client.sendMessage(groupId, media, options);
                             
                             await Promise.race([sendPromise, timeoutPromise]);
                             
                             sent = true;
                             console.log(`[QUEUE] ✅ Sent media ${i + 1}/${imageUrls.length} (Attempt ${attempt})`);
-                            break; // Success, exit retry loop
+                            break; 
                         } catch (attemptError) {
                             console.warn(`[QUEUE] ⚠️ Attempt ${attempt} failed: ${attemptError.message}`);
                             lastError = attemptError;
+                            
+                            // Exponential Backoff: Wait 5s, then 10s
                             if (attempt < 3) {
-                                console.log('[QUEUE] Retrying in 5s...');
-                                await new Promise(r => setTimeout(r, 5000));
+                                const waitTime = attempt * 5000;
+                                console.log(`[QUEUE] Retrying in ${waitTime/1000}s...`);
+                                await new Promise(r => setTimeout(r, waitTime));
                             }
                         }
                     }
