@@ -11,7 +11,8 @@ export enum UpdateCategory {
   DINNER = 'Dinner',
   VITALS = 'Vital Signs',
   GLUCOSE = 'Glucose',
-  GENERAL = 'General Update'
+  GENERAL = 'General Update',
+  VIDEO = 'Video Message'
 }
 
 export interface Resident {

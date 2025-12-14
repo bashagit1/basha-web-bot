@@ -19,7 +19,8 @@ import {
   Sun,
   Smile,
   ChevronDown,
-  Layout
+  Layout,
+  Video
 } from 'lucide-react';
 
 const StaffDashboard: React.FC = () => {
@@ -118,6 +119,35 @@ const StaffDashboard: React.FC = () => {
         console.error("Error processing image", err);
         alert("Could not process image. Try again.");
       }
+    }
+  };
+
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+        const file = e.target.files[0];
+        
+        if (!file.type.startsWith('video/')) {
+            alert("Please select a valid video file.");
+            return;
+        }
+
+        // 100MB Hard Limit for browser safety
+        if (file.size > 100 * 1024 * 1024) {
+             alert("Video is too large (Max 100MB). Please record a shorter clip.");
+             return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+             // For video, we only allow 1 file
+             if (reader.result) {
+                setImages([reader.result as string]);
+             }
+        };
+        reader.onerror = () => {
+            alert("Failed to read video file.");
+        };
+        reader.readAsDataURL(file);
     }
   };
 
@@ -261,7 +291,7 @@ const StaffDashboard: React.FC = () => {
 
         let imagePromise: Promise<string[]> = Promise.resolve(images);
         
-        // Only collage if Vitals and > 1 image
+        // Only collage if Vitals and > 1 image (Video is skipped)
         if (category === UpdateCategory.VITALS && images.length > 1) {
             imagePromise = generateCollage(images).then(collage => [collage]).catch(e => {
                 console.error("Collage failed, sending individual", e);
@@ -309,12 +339,10 @@ const StaffDashboard: React.FC = () => {
         id: UpdateCategory.BREAKFAST, 
         icon: <Coffee className="w-8 h-8" />, 
         label: 'Breakfast', 
-        // Light Mode
         bg: 'bg-amber-100', 
         text: 'text-amber-600', 
         border: 'border-amber-200', 
         ring: 'focus:ring-amber-400',
-        // Dark Mode Overrides
         darkBg: 'dark:bg-amber-900/30',
         darkText: 'dark:text-amber-400',
         darkBorder: 'dark:border-amber-800'
@@ -390,6 +418,18 @@ const StaffDashboard: React.FC = () => {
         darkBg: 'dark:bg-emerald-900/30',
         darkText: 'dark:text-emerald-400',
         darkBorder: 'dark:border-emerald-800'
+    },
+    { 
+        id: UpdateCategory.VIDEO, 
+        icon: <Video className="w-8 h-8" />, 
+        label: 'Video', 
+        bg: 'bg-violet-100', 
+        text: 'text-violet-600', 
+        border: 'border-violet-200', 
+        ring: 'focus:ring-violet-400',
+        darkBg: 'dark:bg-violet-900/30',
+        darkText: 'dark:text-violet-400',
+        darkBorder: 'dark:border-violet-800'
     },
   ];
 
@@ -481,7 +521,10 @@ const StaffDashboard: React.FC = () => {
               {categories.map((cat) => (
                 <button
                   key={cat.id}
-                  onClick={() => setCategory(cat.id)}
+                  onClick={() => {
+                      setCategory(cat.id);
+                      setImages([]); // Clear previous images when switching categories
+                  }}
                   className={`relative group p-4 rounded-3xl border transition-all duration-300 flex flex-col items-center justify-center gap-3 hover:-translate-y-1 hover:shadow-lg ${
                     category === cat.id 
                       ? `${cat.bg} ${cat.darkBg} ${cat.border} ${cat.darkBorder} ring-4 ring-offset-2 ring-brand-100 dark:ring-brand-900 dark:ring-offset-slate-900 shadow-md scale-105 z-10` 
@@ -534,44 +577,86 @@ const StaffDashboard: React.FC = () => {
                                 Collage Enabled
                             </span>
                         )}
+                        {category === UpdateCategory.VIDEO && (
+                            <span className="text-xs text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded-full flex items-center gap-1 font-bold animate-pulse">
+                                <Video className="w-3 h-3" />
+                                Max 5 min retention
+                            </span>
+                        )}
                     </label>
                     
                     <div className="flex flex-wrap gap-4">
-                      {images.map((img, idx) => (
-                        <div key={idx} className="relative w-28 h-28 rounded-2xl overflow-hidden border-4 border-white dark:border-slate-700 shadow-md rotate-1 hover:rotate-0 transition-transform">
-                          <img src={img} alt="Upload preview" className="w-full h-full object-cover" />
+                      {/* PREVIEWS */}
+                      {images.map((mediaUrl, idx) => (
+                        <div key={idx} className={`relative rounded-2xl overflow-hidden border-4 border-white dark:border-slate-700 shadow-md ${category === UpdateCategory.VIDEO ? 'w-full aspect-video' : 'w-28 h-28 rotate-1 hover:rotate-0 transition-transform'}`}>
+                          {category === UpdateCategory.VIDEO ? (
+                              <video src={mediaUrl} controls className="w-full h-full object-cover rounded-xl" />
+                          ) : (
+                              <img src={mediaUrl} alt="Upload preview" className="w-full h-full object-cover" />
+                          )}
                           <button 
                             onClick={() => setImages(images.filter((_, i) => i !== idx))}
-                            className="absolute top-1 right-1 bg-black/50 hover:bg-red-500 text-white p-1 rounded-full backdrop-blur-sm transition-colors"
+                            className="absolute top-2 right-2 bg-black/50 hover:bg-red-500 text-white p-2 rounded-full backdrop-blur-sm transition-colors z-10"
                           >
-                            <XCircle className="w-4 h-4" />
+                            <XCircle className="w-5 h-5" />
                           </button>
                         </div>
                       ))}
 
-                      {images.length < (category === UpdateCategory.VITALS ? 3 : 10) && (
-                        <div className="flex gap-3">
-                            <label className="w-28 h-28 flex flex-col items-center justify-center border-2 border-dashed border-brand-300 dark:border-brand-700 bg-brand-50/50 dark:bg-brand-900/10 text-brand-600 dark:text-brand-400 rounded-2xl cursor-pointer hover:bg-brand-100 dark:hover:bg-brand-900/20 hover:border-brand-400 transition-all group">
-                                <Camera className="w-8 h-8 mb-1 group-hover:scale-110 transition-transform" />
-                                <span className="text-xs font-bold">Camera</span>
-                                <input 
-                                type="file" 
-                                accept="image/*" 
-                                capture="environment" 
-                                className="hidden" 
-                                onChange={handleImageUpload}
-                                />
-                            </label>
-                            <label className="w-28 h-28 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 text-slate-400 dark:text-slate-500 rounded-2xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-400 transition-all group">
-                                <Upload className="w-8 h-8 mb-1 group-hover:scale-110 transition-transform" />
-                                <span className="text-xs font-bold">Upload</span>
-                                <input 
-                                type="file" 
-                                accept="image/*" 
-                                className="hidden" 
-                                onChange={handleImageUpload}
-                                />
-                            </label>
+                      {/* BUTTONS */}
+                      {(category === UpdateCategory.VIDEO ? images.length < 1 : images.length < (category === UpdateCategory.VITALS ? 3 : 10)) && (
+                        <div className="flex gap-3 w-full sm:w-auto">
+                            {category === UpdateCategory.VIDEO ? (
+                                <>
+                                 {/* VIDEO BUTTONS */}
+                                 <label className="flex-1 sm:w-40 h-32 flex flex-col items-center justify-center border-2 border-dashed border-red-300 dark:border-red-700 bg-red-50/50 dark:bg-red-900/10 text-red-600 dark:text-red-400 rounded-2xl cursor-pointer hover:bg-red-100 dark:hover:bg-red-900/20 hover:border-red-400 transition-all group">
+                                    <Video className="w-10 h-10 mb-2 group-hover:scale-110 transition-transform" />
+                                    <span className="text-xs font-bold">Record Video</span>
+                                    <input 
+                                        type="file" 
+                                        accept="video/*" 
+                                        capture="environment" 
+                                        className="hidden" 
+                                        onChange={handleVideoUpload}
+                                    />
+                                </label>
+                                <label className="flex-1 sm:w-40 h-32 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 text-slate-400 dark:text-slate-500 rounded-2xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-400 transition-all group">
+                                    <Upload className="w-10 h-10 mb-2 group-hover:scale-110 transition-transform" />
+                                    <span className="text-xs font-bold">Upload Video</span>
+                                    <input 
+                                        type="file" 
+                                        accept="video/*" 
+                                        className="hidden" 
+                                        onChange={handleVideoUpload}
+                                    />
+                                </label>
+                                </>
+                            ) : (
+                                <>
+                                {/* IMAGE BUTTONS */}
+                                <label className="w-28 h-28 flex flex-col items-center justify-center border-2 border-dashed border-brand-300 dark:border-brand-700 bg-brand-50/50 dark:bg-brand-900/10 text-brand-600 dark:text-brand-400 rounded-2xl cursor-pointer hover:bg-brand-100 dark:hover:bg-brand-900/20 hover:border-brand-400 transition-all group">
+                                    <Camera className="w-8 h-8 mb-1 group-hover:scale-110 transition-transform" />
+                                    <span className="text-xs font-bold">Camera</span>
+                                    <input 
+                                        type="file" 
+                                        accept="image/*" 
+                                        capture="environment" 
+                                        className="hidden" 
+                                        onChange={handleImageUpload}
+                                    />
+                                </label>
+                                <label className="w-28 h-28 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/50 text-slate-400 dark:text-slate-500 rounded-2xl cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800 hover:border-slate-400 transition-all group">
+                                    <Upload className="w-8 h-8 mb-1 group-hover:scale-110 transition-transform" />
+                                    <span className="text-xs font-bold">Upload</span>
+                                    <input 
+                                        type="file" 
+                                        accept="image/*" 
+                                        className="hidden" 
+                                        onChange={handleImageUpload}
+                                    />
+                                </label>
+                                </>
+                            )}
                         </div>
                       )}
                     </div>

@@ -87,7 +87,7 @@ let lastJobStartTime = 0; // Timestamp to track stuck jobs
 
 // --- SCHEDULED MAINTENANCE ---
 
-// 1. Database Image Cleanup (Every 1 Hour)
+// 1. Database Image Cleanup (Every 1 Hour) - General
 setInterval(async () => {
     if (!supabase) return;
 
@@ -116,8 +116,35 @@ setInterval(async () => {
     }
 }, 60 * 60 * 1000);
 
+// 2. VIDEO QUICK CLEANUP (Every 1 Minute)
+// Deletes 'Video Message' data older than 5 minutes as requested.
+setInterval(async () => {
+    if (!supabase) return;
+    
+    // 5 minutes ago
+    const timeLimit = new Date(Date.now() - 5 * 60 * 1000).toISOString();
 
-// 2. Keep-Alive Ping (Every 4 Hours)
+    try {
+        const { error } = await supabase
+            .from('activity_logs')
+            .update({ image_urls: [] }) // Clears the heavy video data
+            .eq('category', 'Video Message')
+            .lt('created_at', timeLimit)
+            // Ensure we don't repeatedly try to clear already empty rows (Supabase doesn't natively support array length check in filtered update easily without RPC, but this is safe enough as update to same value is cheap)
+            .neq('image_urls', '{}'); 
+            
+        if (error) {
+            // suppress common errors
+        } else {
+             // success silently
+        }
+    } catch (err) {
+        console.error('[VIDEO CLEANUP] Failed:', err.message);
+    }
+}, 60 * 1000); // Runs every minute
+
+
+// 3. Keep-Alive Ping (Every 4 Hours)
 setInterval(async () => {
     if (isReady && client) {
         console.log('[MAINTENANCE] Sending Keep-Alive Ping...');
@@ -280,7 +307,7 @@ async function processJob(job) {
     const hasImages = imageUrls && imageUrls.length > 0;
     const hasText = message && message.trim().length > 0;
 
-    // 1. Send Images
+    // 1. Send Images (or Video)
     if (hasImages) {
         for (let i = 0; i < imageUrls.length; i++) {
             const url = imageUrls[i];
@@ -292,21 +319,27 @@ async function processJob(job) {
                     const mimeMatch = parts[0].match(/:(.*?);/);
                     const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
                     const data = parts[1];
-                    media = new MessageMedia(mime, data, `update_${Date.now()}_${i}.jpg`);
+                    // Name the file based on mime type for WhatsApp to recognize it
+                    const ext = mime.includes('video') ? 'mp4' : 'jpg';
+                    media = new MessageMedia(mime, data, `update_${Date.now()}_${i}.${ext}`);
                 } else {
                     media = await MessageMedia.fromUrl(url);
                 }
                 
                 if (media) {
+                    // Send media
                     const sendPromise = client.sendMessage(groupId, media);
+                    // Increased timeout for video uploads
+                    const timeoutSeconds = media.mimetype.includes('video') ? 60000 : 20000;
+                    
                     const timeoutPromise = new Promise((_, reject) => 
-                        setTimeout(() => reject(new Error('Timeout sending image')), 20000)
+                        setTimeout(() => reject(new Error('Timeout sending media')), timeoutSeconds)
                     );
                     await Promise.race([sendPromise, timeoutPromise]);
-                    console.log(`[QUEUE] Sent image ${i + 1}/${imageUrls.length}`);
+                    console.log(`[QUEUE] Sent media ${i + 1}/${imageUrls.length}`);
                 }
             } catch (imgErr) {
-                console.error(`[QUEUE] Error sending image ${i+1}:`, imgErr.message);
+                console.error(`[QUEUE] Error sending media ${i+1}:`, imgErr.message);
             } finally {
                 media = null; 
             }
@@ -390,7 +423,7 @@ app.post('/send-update', (req, res) => {
 
     const { groupId, message, imageUrls } = req.body;
     
-    console.log(`[API] Received update request for Group: ${groupId}, Images: ${imageUrls?.length || 0}`);
+    console.log(`[API] Received update request for Group: ${groupId}, Media Count: ${imageUrls?.length || 0}`);
 
     if (!groupId) {
         return res.status(400).json({ error: 'Missing groupId' });
