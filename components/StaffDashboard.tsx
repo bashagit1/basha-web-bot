@@ -121,7 +121,7 @@ const StaffDashboard: React.FC = () => {
     }
   };
 
-  // --- COLLAGE ENGINE (UPDATED 1:1 GRID) ---
+  // --- COLLAGE ENGINE (UPDATED: SMART FIT) ---
   const generateCollage = async (imageUrls: string[]): Promise<string> => {
     if (imageUrls.length <= 1) return imageUrls[0];
 
@@ -152,51 +152,91 @@ const StaffDashboard: React.FC = () => {
     const count = loadedImages.length;
     const gap = 8; // white gap size
 
-    // Helper: Draw image nicely filling the rect (Object-Fit: Cover)
-    const drawImg = (img: HTMLImageElement, x: number, y: number, w: number, h: number) => {
+    // --- SMART DRAW HELPER ---
+    // This draws the image fully contained (letterboxed) so NO NUMBERS are cut off.
+    // It fills the empty space with a blurred version of the same image for a pro look.
+    const drawSmart = (img: HTMLImageElement, x: number, y: number, w: number, h: number) => {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x, y, w, h);
+        ctx.clip();
+
+        // 1. Background: Blurred & Zoomed version of image
+        // We draw it covering the area to serve as a nice backdrop
         const imgRatio = img.width / img.height;
         const targetRatio = w / h;
-        let sx, sy, sWidth, sHeight;
+        let bx, by, bw, bh;
         
-        if (targetRatio > imgRatio) { 
-            // Target is wider than source -> Crop top/bottom
-            sWidth = img.width;
-            sHeight = img.width / targetRatio;
-            sx = 0;
-            sy = (img.height - sHeight) / 2;
-        } else { 
-            // Target is taller than source -> Crop sides
-            sHeight = img.height;
-            sWidth = img.height * targetRatio;
-            sy = 0;
-            sx = (img.width - sWidth) / 2;
+        // Logic for 'cover' scaling for the blur background
+        if (targetRatio > imgRatio) {
+            bw = w;
+            bh = w / imgRatio;
+            bx = x;
+            by = y + (h - bh) / 2;
+        } else {
+            bh = h;
+            bw = h * imgRatio;
+            by = y;
+            bx = x + (w - bw) / 2;
         }
-        ctx.drawImage(img, sx, sy, sWidth, sHeight, x, y, w, h);
+        
+        ctx.filter = 'blur(40px) brightness(0.6)'; // Heavy blur + Darken
+        ctx.drawImage(img, bx - 10, by - 10, bw + 20, bh + 20); // slightly larger to avoid edge artifacts
+        ctx.filter = 'none';
+
+        // 2. Foreground: Contained image (Show Perfectly)
+        let fx, fy, fw, fh;
+        if (targetRatio > imgRatio) {
+             // Slot is wider than image -> Fit to Height
+             fh = h;
+             fw = h * imgRatio;
+             fx = x + (w - fw) / 2;
+             fy = y;
+        } else {
+             // Slot is taller than image -> Fit to Width
+             fw = w;
+             fh = w / imgRatio;
+             fx = x;
+             fy = y + (h - fh) / 2;
+        }
+        
+        // Add a nice shadow to lift the image off the blur
+        ctx.shadowColor = 'rgba(0,0,0,0.5)';
+        ctx.shadowBlur = 20;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 10;
+        
+        ctx.drawImage(img, fx, fy, fw, fh);
+        
+        ctx.restore();
     };
 
     if (count === 2) {
         // 2 Images: Split Vertically (Top and Bottom)
-        // Keeps them wide and large
         const h = (size - gap) / 2;
-        drawImg(loadedImages[0], 0, 0, size, h);
-        drawImg(loadedImages[1], 0, h + gap, size, h);
+        drawSmart(loadedImages[0], 0, 0, size, h);
+        drawSmart(loadedImages[1], 0, h + gap, size, h);
     } else if (count === 3) {
-        // 3 Images: 2 on Top, 1 on Bottom
-        const half = (size - gap) / 2;
+        // 3 Images: 1 Large Top, 2 Small Bottom
+        // Perfect for: Main Vitals (BP) on top, others (SpO2/Temp) below
+        const halfH = (size - gap) / 2;
+        const halfW = (size - gap) / 2;
         
-        // Top Left
-        drawImg(loadedImages[0], 0, 0, half, half);
-        // Top Right
-        drawImg(loadedImages[1], half + gap, 0, half, half);
-        // Bottom Full
-        drawImg(loadedImages[2], 0, half + gap, size, half);
+        // Top Full Width (Image 1)
+        drawSmart(loadedImages[0], 0, 0, size, halfH);
+        
+        // Bottom Left (Image 2)
+        drawSmart(loadedImages[1], 0, halfH + gap, halfW, halfH);
+        
+        // Bottom Right (Image 3)
+        drawSmart(loadedImages[2], halfW + gap, halfH + gap, halfW, halfH);
     } else {
-        // 4+ Images: 2x2 Grid (for future proofing)
+        // 4+ Images: 2x2 Grid
         const half = (size - gap) / 2;
-        drawImg(loadedImages[0], 0, 0, half, half);
-        drawImg(loadedImages[1], half + gap, 0, half, half);
-        drawImg(loadedImages[2], 0, half + gap, half, half);
-        drawImg(loadedImages[3], half + gap, half + gap, half, half);
+        drawSmart(loadedImages[0], 0, 0, half, half);
+        drawSmart(loadedImages[1], half + gap, 0, half, half);
+        drawSmart(loadedImages[2], 0, half + gap, half, half);
+        drawSmart(loadedImages[3], half + gap, half + gap, half, half);
     }
 
     // High quality export
