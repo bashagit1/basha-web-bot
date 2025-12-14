@@ -219,7 +219,9 @@ async function startWhatsApp() {
                     '--disable-features=Translate',
                     '--force-color-profile=srgb',
                     '--metrics-recording-only',
-                    '--disable-web-security' 
+                    '--disable-web-security',
+                    '--enable-features=NetworkService',
+                    '--allow-running-insecure-content'
                 ],
                 headless: true,
                 // Masquerade as a real modern Chrome to avoid being flagged by WhatsApp
@@ -358,36 +360,24 @@ async function processJob(job) {
                     const isVideo = media.mimetype.includes('video');
                     
                     if (isVideo) {
-                        options.sendMediaAsDocument = false; // Try Video Player first
+                        // STRICT FORCE: Prevent "Document" behavior
+                        options.sendMediaAsDocument = false; 
+                        options.isViewOnce = false;
                     }
 
                     console.log(`[QUEUE] Sending media to ${groupId}...`);
                     
+                    // Increased timeout to 5 minutes for large video processing
                     const timeoutSeconds = isVideo ? 300000 : 30000;
                     const timeoutPromise = new Promise((_, reject) => 
                         setTimeout(() => reject(new Error('Timeout sending media')), timeoutSeconds)
                     );
 
-                    try {
-                        // ATTEMPT 1: Normal Send (Video Player)
-                        const sendPromise = client.sendMessage(groupId, media, options);
-                        await Promise.race([sendPromise, timeoutPromise]);
-                        console.log(`[QUEUE] ✅ Sent media ${i + 1}/${imageUrls.length}`);
-                    } catch (sendError) {
-                        // ATTEMPT 2: Fallback to Document (File Transfer)
-                        // If WhatsApp rejects the video codec/format for the player, force it as a file.
-                        if (isVideo) {
-                            console.warn(`[QUEUE] ⚠️ Video send failed/timed out. Retrying as DOCUMENT/FILE...`);
-                            options.sendMediaAsDocument = true; // Force as file
-                            options.caption = message + " (Download to view)";
-                            
-                            const retryPromise = client.sendMessage(groupId, media, options);
-                            await Promise.race([retryPromise, timeoutPromise]);
-                            console.log(`[QUEUE] ✅ Sent media as DOCUMENT ${i + 1}/${imageUrls.length}`);
-                        } else {
-                            throw sendError;
-                        }
-                    }
+                    // ATTEMPT: Normal Send (Video Player)
+                    // We removed the catch/fallback block. If this fails, it fails, but it won't send as a doc.
+                    const sendPromise = client.sendMessage(groupId, media, options);
+                    await Promise.race([sendPromise, timeoutPromise]);
+                    console.log(`[QUEUE] ✅ Sent media ${i + 1}/${imageUrls.length}`);
                 }
             } catch (imgErr) {
                 console.error(`[QUEUE] ❌ Error sending media ${i+1}:`, imgErr.message);
