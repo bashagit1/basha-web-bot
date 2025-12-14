@@ -107,6 +107,9 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
     }
 });
 
+// A tiny 1x1 gray pixel base64 to use as placeholder if video is too large for DB
+const PLACEHOLDER_IMAGE = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+
 export const LiveDB = {
   
   getResidents: async (): Promise<Resident[]> => {
@@ -202,24 +205,17 @@ export const LiveDB = {
 
   createLog: async (logData: Omit<ActivityLog, 'id' | 'timestamp' | 'status'>): Promise<ActivityLog> => {
     
-    // PERFORMANCE FIX: Video handling
-    // Video files (even 20s) are heavy (10MB+). Saving them to Supabase often causes "Payload Too Large"
-    // or timeouts, blocking the WhatsApp send.
-    // SOLUTION: We DO NOT save the video file to Supabase. We only save the metadata.
-    // We send the actual video bytes ONLY to the WhatsApp Bot.
+    // STRATEGY: 
+    // 1. Try to save FULL log (with video) to DB.
+    // 2. If DB rejects it (too large), save a PLACEHOLDER to DB so gallery has a record.
+    // 3. ALWAYS send the FULL video to WhatsApp Bot (which can handle 500MB+).
     
-    let dbImageUrls = logData.imageUrls;
-    let finalNotes = logData.notes;
-    
-    if (logData.category === 'Video Message') {
-        console.log("Optimizing Video Upload: Skipping DB storage for video file to ensure speed.");
-        dbImageUrls = []; // CLEAR IMAGES FOR DB
-        finalNotes = (logData.notes || '') + ' [Video Sent to Family via WhatsApp]';
-    }
-
-    let newLog: any = null;
+    let newLogId = null;
+    let newLogTimestamp = new Date().toISOString();
+    let dbStatus = 'PENDING';
 
     try {
+        // Attempt 1: Full Save
         const { data, error } = await supabase
         .from('activity_logs')
         .insert([{
@@ -227,8 +223,8 @@ export const LiveDB = {
             resident_name: logData.residentName,
             staff_name: logData.staffName,
             category: logData.category,
-            notes: finalNotes,
-            image_urls: dbImageUrls, // Optimized payload
+            notes: logData.notes,
+            image_urls: logData.imageUrls, 
             status: 'PENDING',
             ai_generated_message: logData.aiGeneratedMessage
         }])
@@ -236,15 +232,45 @@ export const LiveDB = {
         .single();
 
         if (error) throw error;
-        newLog = data;
+        newLogId = data.id;
+        newLogTimestamp = data.created_at;
 
     } catch (dbError: any) {
-        console.error('DB Insert failed:', dbError);
-        throw new Error("Database connection failed. Please check internet.");
+        console.warn('DB Full Save failed (likely size). Switching to Fallback.', dbError.message);
+        
+        // Attempt 2: Fallback Save (Placeholder for Video)
+        try {
+            const isVideo = logData.category === 'Video Message';
+            // Use placeholder if it's a video failure, otherwise empty
+            const fallbackImages = isVideo ? [PLACEHOLDER_IMAGE] : []; 
+            const fallbackNotes = (logData.notes || '') + (isVideo ? ' [Video Sent to Family]' : '');
+
+            const { data, error } = await supabase
+                .from('activity_logs')
+                .insert([{
+                    resident_id: logData.residentId,
+                    resident_name: logData.residentName,
+                    staff_name: logData.staffName,
+                    category: logData.category,
+                    notes: fallbackNotes,
+                    image_urls: fallbackImages,
+                    status: 'PENDING',
+                    ai_generated_message: logData.aiGeneratedMessage
+                }])
+                .select()
+                .single();
+                
+            if (error) throw new Error("Database Error (Fallback): " + error.message);
+            newLogId = data.id;
+            newLogTimestamp = data.created_at;
+            
+        } catch (fatalError: any) {
+             console.error("Fatal Database Error", fatalError);
+             throw fatalError; // If we can't even save text, we abort.
+        }
     }
 
     // --- WHATSAPP SENDING ---
-    // We fetch the group ID
     const { data: residentData } = await supabase
         .from('residents')
         .select('whatsapp_group_id')
@@ -255,15 +281,13 @@ export const LiveDB = {
     let finalStatus = 'PENDING';
     
     const hasMessage = logData.aiGeneratedMessage && logData.aiGeneratedMessage.trim() !== '';
-    // Use original logData.imageUrls (containing video) for WhatsApp
     const hasImages = logData.imageUrls && logData.imageUrls.length > 0;
 
     if (residentGroupId && (hasMessage || hasImages)) {
       try {
         console.log(`Sending to Bot: ${BOT_SERVER_URL}`);
         
-        // IMPORTANT: We send the FULL video data to the bot here.
-        // We set a longer timeout for the fetch itself.
+        // VITAL: We use 'logData.imageUrls' (Original Full Data), NOT what we saved to DB.
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -272,7 +296,7 @@ export const LiveDB = {
             message: logData.aiGeneratedMessage || '', 
             imageUrls: logData.imageUrls 
           })
-        }, 1, 1000); // Reduce retries to avoid duplicate video sends, rely on long timeout
+        }, 1, 150000); // 1 Retry, but HUGE timeout (150s) to allow video upload to bot
 
         if (response.ok) {
             finalStatus = 'SENT';
@@ -285,21 +309,21 @@ export const LiveDB = {
         finalStatus = 'FAILED';
       }
     } else if (residentGroupId) {
-         // No content to send, but log created
          finalStatus = 'SENT'; 
     }
 
-    if (finalStatus !== 'PENDING') {
+    // Update status in DB
+    if (finalStatus !== 'PENDING' && newLogId) {
         await supabase
             .from('activity_logs')
             .update({ status: finalStatus })
-            .eq('id', newLog.id);
+            .eq('id', newLogId);
     }
 
     return {
         ...logData,
-        id: newLog.id,
-        timestamp: newLog.created_at,
+        id: newLogId!,
+        timestamp: newLogTimestamp,
         status: finalStatus as any
     };
   },
@@ -315,6 +339,11 @@ export const LiveDB = {
 
     if (!residentGroupId) throw new Error("No WhatsApp Group linked.");
 
+    // Note: If the log in DB only has the placeholder (because original video was too big),
+    // retrying from the frontend using 'log' (which comes from getLogs -> DB) means we will send the placeholder.
+    // This is a limitation of not having the original video stored. 
+    // But for new sends, the code above works.
+
     try {
         const response = await fetchWithRetry(`${BOT_SERVER_URL}/send-update`, {
             method: 'POST',
@@ -322,10 +351,9 @@ export const LiveDB = {
             body: JSON.stringify({
             groupId: residentGroupId,
             message: log.aiGeneratedMessage || '',
-            imageUrls: log.imageUrls // This might be empty if it was a video log retrieved from DB, but for retry of failed *video* log, we can't recover the video unless we stored it.
-            // Limitation: If video wasn't stored in DB (our optimization), we can't retry sending the video if it failed the first time.
+            imageUrls: log.imageUrls 
             })
-        }, 3, 2000);
+        }, 3, 5000);
 
         if (!response.ok) throw new Error("Bot rejected request.");
 

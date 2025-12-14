@@ -45,9 +45,9 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'ngrok-skip-browser-warning']
 }));
 
-// Increase limit for base64 images to 500mb to prevent "Payload Too Large" errors
-app.use(express.json({ limit: '500mb' }));
-app.use(express.urlencoded({ limit: '500mb', extended: true }));
+// Increase limit for base64 images to 1GB to prevent "Payload Too Large" errors
+app.use(express.json({ limit: '1gb' }));
+app.use(express.urlencoded({ limit: '1gb', extended: true }));
 
 // --- IMMEDIATE SERVER START ---
 // CRITICAL FIX: Listen on '0.0.0.0' to allow connections from external devices (Phones) on the same WiFi.
@@ -91,7 +91,6 @@ let lastJobStartTime = 0; // Timestamp to track stuck jobs
 setInterval(async () => {
     if (!supabase) return;
 
-    // Trigger Garbage Collection if exposed (via --expose-gc)
     if (global.gc) {
         console.log('[MAINTENANCE] Running Garbage Collection...');
         global.gc();
@@ -117,7 +116,6 @@ setInterval(async () => {
 }, 60 * 60 * 1000);
 
 // 2. VIDEO QUICK CLEANUP (Every 1 Minute)
-// Deletes 'Video Message' data older than 5 minutes as requested.
 setInterval(async () => {
     if (!supabase) return;
     
@@ -127,21 +125,18 @@ setInterval(async () => {
     try {
         const { error } = await supabase
             .from('activity_logs')
-            .update({ image_urls: [] }) // Clears the heavy video data
+            .update({ image_urls: [] }) 
             .eq('category', 'Video Message')
             .lt('created_at', timeLimit)
-            // Ensure we don't repeatedly try to clear already empty rows (Supabase doesn't natively support array length check in filtered update easily without RPC, but this is safe enough as update to same value is cheap)
             .neq('image_urls', '{}'); 
             
         if (error) {
             // suppress common errors
-        } else {
-             // success silently
         }
     } catch (err) {
         console.error('[VIDEO CLEANUP] Failed:', err.message);
     }
-}, 60 * 1000); // Runs every minute
+}, 60 * 1000); 
 
 
 // 3. Keep-Alive Ping (Every 4 Hours)
@@ -168,8 +163,8 @@ setInterval(async () => {
     // WATCHDOG: Check for STUCK JOBS
     if (isProcessingQueue && lastJobStartTime > 0) {
         const duration = Date.now() - lastJobStartTime;
-        if (duration > 180000) { // 3 minutes
-            console.error(`[WATCHDOG] 🚨 CRITICAL: Job stuck for ${Math.round(duration/1000)}s. Browser likely frozen.`);
+        if (duration > 300000) { // 5 minutes (Increased for Video)
+            console.error(`[WATCHDOG] 🚨 CRITICAL: Job stuck for ${Math.round(duration/1000)}s.`);
             console.error('[WATCHDOG] Force restarting server...');
             process.exit(1); 
         }
@@ -186,15 +181,12 @@ setInterval(async () => {
             process.exit(1);
         }
     }
-}, 60000); // Check every 60 seconds
+}, 60000); 
 
 // --- INITIALIZATION LOOP ---
 async function startWhatsApp() {
     console.log('Initializing WhatsApp Client...');
     
-    // DETERMINE STORAGE PATH
-    // If on Railway with a Volume, use /app/auth_data. Otherwise use default local folder.
-    // RAILWAY_VOLUME_MOUNT_PATH should be set to /app/auth_data in Railway Dashboard.
     const authPath = process.env.RAILWAY_VOLUME_MOUNT_PATH 
         ? process.env.RAILWAY_VOLUME_MOUNT_PATH 
         : './.wwebjs_auth';
@@ -223,7 +215,6 @@ async function startWhatsApp() {
                     '--metrics-recording-only'
                 ],
                 headless: true,
-                // Spoof User Agent to look like Real Chrome
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             }
         });
@@ -302,6 +293,18 @@ async function processQueue() {
     }
 }
 
+// HELPER: Determine Extension from Mime Type
+const getExtension = (mime) => {
+    if (mime.includes('video/mp4')) return 'mp4';
+    if (mime.includes('video/webm')) return 'mp4'; // WhatsApp prefers mp4 container even for webm streams often
+    if (mime.includes('video/3gpp')) return '3gp';
+    if (mime.includes('video/quicktime')) return 'mov';
+    if (mime.includes('image/png')) return 'png';
+    if (mime.includes('image/jpeg')) return 'jpg';
+    if (mime.includes('image/webp')) return 'webp';
+    return mime.split('/')[1] || 'dat';
+};
+
 async function processJob(job) {
     const { groupId, message, imageUrls } = job;
     const hasImages = imageUrls && imageUrls.length > 0;
@@ -319,8 +322,10 @@ async function processJob(job) {
                     const mimeMatch = parts[0].match(/:(.*?);/);
                     const mime = mimeMatch ? mimeMatch[1] : 'image/jpeg';
                     const data = parts[1];
-                    // Name the file based on mime type for WhatsApp to recognize it
-                    const ext = mime.includes('video') ? 'mp4' : 'jpg';
+                    
+                    // IMPROVED EXTENSION DETECTION
+                    const ext = getExtension(mime);
+                    
                     media = new MessageMedia(mime, data, `update_${Date.now()}_${i}.${ext}`);
                 } else {
                     media = await MessageMedia.fromUrl(url);
@@ -330,7 +335,7 @@ async function processJob(job) {
                     // Send media
                     const sendPromise = client.sendMessage(groupId, media);
                     // Increased timeout for video uploads to 5 minutes (300000ms)
-                    const timeoutSeconds = media.mimetype.includes('video') ? 300000 : 20000;
+                    const timeoutSeconds = media.mimetype.includes('video') ? 300000 : 30000;
                     
                     const timeoutPromise = new Promise((_, reject) => 
                         setTimeout(() => reject(new Error('Timeout sending media')), timeoutSeconds)
