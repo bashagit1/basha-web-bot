@@ -121,8 +121,9 @@ const StaffDashboard: React.FC = () => {
         }
 
         // Safety check for raw file size
-        if (file.size > 60 * 1024 * 1024) {
-             alert("File is too large (>60MB). Please record a shorter video.");
+        // REDUCED TO 35MB to ensure successful uploads over WhatsApp Web
+        if (file.size > 35 * 1024 * 1024) {
+             alert("File is too large (>35MB). Please record a shorter video or lower your camera resolution.");
              e.target.value = '';
              return;
         }

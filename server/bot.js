@@ -198,6 +198,11 @@ async function startWhatsApp() {
             authStrategy: new LocalAuth({
                 dataPath: authPath
             }), 
+            // Lock the web version to a stable release to prevent media upload issues
+            webVersionCache: {
+                type: 'remote',
+                remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+            },
             puppeteer: {
                 args: [
                     '--no-sandbox', 
@@ -209,13 +214,15 @@ async function startWhatsApp() {
                     '--disable-gpu',
                     '--disable-extensions',
                     '--mute-audio',
+                    '--disable-software-rasterizer', // Helps with video processing stability
                     '--no-default-browser-check',
                     '--disable-features=Translate',
                     '--force-color-profile=srgb',
                     '--metrics-recording-only',
-                    '--disable-web-security' // Potentially helps with blob upload restrictions
+                    '--disable-web-security' 
                 ],
                 headless: true,
+                // Masquerade as a real modern Chrome to avoid being flagged by WhatsApp
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
             }
         });
@@ -323,24 +330,18 @@ async function processJob(job) {
                     const data = parts[1];
 
                     // --- UNIVERSAL VIDEO FIX ---
-                    // WhatsApp Web is extremely picky about MIME types and Extensions.
-                    // If it sees 'video/webm' or 'video/quicktime', it might reject it or send as doc.
-                    // We force EVERYTHING video-related to be treated as 'video/mp4'.
-                    // The underlying container (h.264, vp8) is usually handled by the receiver's player.
                     let ext = 'jpg';
                     if (mime.startsWith('video/')) {
                         console.log(`[QUEUE] ⚠️ Masquerading ${mime} as video/mp4 for WhatsApp compatibility.`);
                         mime = 'video/mp4'; 
                         ext = 'mp4';
                     } else {
-                         // Simple image extension logic
                          if (mime.includes('png')) ext = 'png';
                          else if (mime.includes('webp')) ext = 'webp';
                          else ext = 'jpg';
                     }
                     
                     const filename = `update_${Date.now()}_${i}.${ext}`;
-                    
                     media = new MessageMedia(mime, data, filename);
                     console.log(`[QUEUE] Created Media Object: ${mime} size=${Math.round(data.length/1024)}KB`);
 
@@ -349,38 +350,51 @@ async function processJob(job) {
                 }
                 
                 if (media) {
-                    // Send media with caption (if it's the first/only item and there is text)
                     const options = {};
                     if (hasText && i === imageUrls.length - 1) {
                          options.caption = message;
                     }
                     
-                    // Force video handling flags
-                    if (media.mimetype.includes('video')) {
-                        options.sendMediaAsDocument = false; // Force video view
+                    const isVideo = media.mimetype.includes('video');
+                    
+                    if (isVideo) {
+                        options.sendMediaAsDocument = false; // Try Video Player first
                     }
 
                     console.log(`[QUEUE] Sending media to ${groupId}...`);
-
-                    const sendPromise = client.sendMessage(groupId, media, options);
                     
-                    // Increased timeout for video uploads to 5 minutes (300000ms)
-                    const timeoutSeconds = media.mimetype.includes('video') ? 300000 : 30000;
-                    
+                    const timeoutSeconds = isVideo ? 300000 : 30000;
                     const timeoutPromise = new Promise((_, reject) => 
                         setTimeout(() => reject(new Error('Timeout sending media')), timeoutSeconds)
                     );
-                    
-                    await Promise.race([sendPromise, timeoutPromise]);
-                    console.log(`[QUEUE] ✅ Sent media ${i + 1}/${imageUrls.length}`);
+
+                    try {
+                        // ATTEMPT 1: Normal Send (Video Player)
+                        const sendPromise = client.sendMessage(groupId, media, options);
+                        await Promise.race([sendPromise, timeoutPromise]);
+                        console.log(`[QUEUE] ✅ Sent media ${i + 1}/${imageUrls.length}`);
+                    } catch (sendError) {
+                        // ATTEMPT 2: Fallback to Document (File Transfer)
+                        // If WhatsApp rejects the video codec/format for the player, force it as a file.
+                        if (isVideo) {
+                            console.warn(`[QUEUE] ⚠️ Video send failed/timed out. Retrying as DOCUMENT/FILE...`);
+                            options.sendMediaAsDocument = true; // Force as file
+                            options.caption = message + " (Download to view)";
+                            
+                            const retryPromise = client.sendMessage(groupId, media, options);
+                            await Promise.race([retryPromise, timeoutPromise]);
+                            console.log(`[QUEUE] ✅ Sent media as DOCUMENT ${i + 1}/${imageUrls.length}`);
+                        } else {
+                            throw sendError;
+                        }
+                    }
                 }
             } catch (imgErr) {
                 console.error(`[QUEUE] ❌ Error sending media ${i+1}:`, imgErr.message);
-                throw imgErr; // Rethrow to trigger the 'catch' block in processQueue (updating DB)
+                throw imgErr; // Rethrow to trigger the 'catch' block in processQueue (updating DB to FAILED)
             } finally {
                 media = null; 
             }
-            // Small delay between media items to prevent flooding/bans
             await new Promise(r => setTimeout(r, 2000));
         }
     } 
